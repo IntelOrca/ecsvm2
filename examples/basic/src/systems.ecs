@@ -1,0 +1,7 @@
+const GRAVITY: f32 = 9.8;
+
+system Gravity {
+    // The runtime MVP does not parse or execute this yet.
+    // This file exists as the canonical source-project shape for later phases.
+}
+

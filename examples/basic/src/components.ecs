@@ -1,0 +1,16 @@
+namespace app {
+    component transform {
+        position: vec3;
+    }
+
+    component velocity {
+        value: vec3;
+    }
+}
+
+struct vec3 {
+    x: f32;
+    y: f32;
+    z: f32;
+}
+

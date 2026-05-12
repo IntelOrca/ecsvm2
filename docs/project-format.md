@@ -1,0 +1,16 @@
+## Example project
+- pong
+    - project.toml
+    - res/
+        - textures/
+            - test.png
+    - src/
+        - components/
+            - paddle.ecs
+            - ball.ecs
+        - systems/
+            - physics.ecs
+            - controller.ecs
+        - utils.ecs
+    - out/
+        - pong.ecsbin

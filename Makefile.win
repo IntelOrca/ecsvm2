@@ -1,0 +1,77 @@
+CC=cl
+OUTDIR=build
+OBJDIR=obj
+TARGET=$(OUTDIR)\ecsvm.exe
+SDL3_INCDIR=dependencies\include
+SDL3_LIBDIR=dependencies\lib\x64
+SDL3_DLL=dependencies\lib\x64\SDL3.dll
+
+OBJFILES=$(OBJDIR)\component.obj \
+	$(OBJDIR)\ecsvm.obj \
+	$(OBJDIR)\main.obj \
+	$(OBJDIR)\pong.obj \
+	$(OBJDIR)\system_renderer.obj \
+	$(OBJDIR)\system_window.obj
+
+LEGACYOBJS=component.obj \
+	ecsvm.obj \
+	main.obj \
+	pong.obj \
+	system_renderer.obj \
+	system_window.obj
+
+CFLAGS=/nologo /TC /std:c11 /W4 /WX /Iinclude /I$(SDL3_INCDIR) /D_CRT_SECURE_NO_WARNINGS
+LDFLAGS=/link /NOLOGO /OUT:$(TARGET) /LIBPATH:$(SDL3_LIBDIR) SDL3.lib
+
+all: purgelegacyobjs $(TARGET) copydll
+
+purgelegacyobjs:
+	@if exist component.obj del /Q component.obj
+	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist main.obj del /Q main.obj
+	@if exist pong.obj del /Q pong.obj
+	@if exist system_renderer.obj del /Q system_renderer.obj
+	@if exist system_window.obj del /Q system_window.obj
+
+$(TARGET): $(OBJFILES)
+	@if not exist $(OUTDIR) mkdir $(OUTDIR)
+	$(CC) $(OBJFILES) $(LDFLAGS)
+
+$(OBJDIR)\component.obj: src\component.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\ecsvm.obj: src\ecsvm.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\main.obj: src\main.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\pong.obj: src\pong.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\system_renderer.obj: src\system_renderer.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\system_window.obj: src\system_window.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+copydll: $(TARGET)
+	@copy /Y $(SDL3_DLL) $(OUTDIR)\SDL3.dll >NUL
+
+clean:
+	@if exist $(OUTDIR)\ecsvm.exe del /Q $(OUTDIR)\ecsvm.exe
+	@if exist $(OUTDIR)\SDL3.dll del /Q $(OUTDIR)\SDL3.dll
+	@if exist $(OBJDIR) rmdir /S /Q $(OBJDIR)
+	@if exist component.obj del /Q component.obj
+	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist main.obj del /Q main.obj
+	@if exist pong.obj del /Q pong.obj
+	@if exist system_renderer.obj del /Q system_renderer.obj
+	@if exist system_window.obj del /Q system_window.obj
+

@@ -1,0 +1,13 @@
+namespace pong {
+    [core.Component]
+    struct paddle {
+        speed: f32;
+        up_key: i32;
+        down_key: i32;
+    }
+
+    [core.Component]
+    struct velocity {
+        value: core.vec2;
+    }
+}

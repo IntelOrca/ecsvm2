@@ -80,6 +80,10 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine);
 
 ecsvm_status_t ecsvm_engine_register_builtin_components(ecsvm_engine_t *engine);
 ecsvm_component_id_t ecsvm_engine_hierarchy_component(const ecsvm_engine_t *engine);
+ecsvm_component_id_t ecsvm_engine_find_component(
+    const ecsvm_engine_t *engine,
+    const char *name
+);
 
 ecsvm_status_t ecsvm_engine_register_component(
     ecsvm_engine_t *engine,

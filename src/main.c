@@ -1,4 +1,5 @@
 #include "ecsvm/component.h"
+#include "ecsvm/project.h"
 #include "ecsvm/ecsvm.h"
 
 #include <stdio.h>
@@ -19,6 +20,7 @@ typedef struct demo_components {
 static demo_components_t g_demo_components;
 
 int ecsvm_run_pong(void);
+int ecsvm_run_pong_binary(const char *ecsbin_path);
 
 static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
 {
@@ -90,8 +92,11 @@ static ecsvm_status_t demo_integrate(ecsvm_context_t *ctx)
 
 static void print_usage(const char *argv0)
 {
-    fprintf(stderr, "usage: %s --self-test | --pong\n", argv0);
-    fprintf(stderr, "loader phases are specified in docs/ and not implemented yet\n");
+    fprintf(
+        stderr,
+        "usage: %s --self-test | --pong | build <project> | run <project|ecsbin>\n",
+        argv0
+    );
 }
 
 static int run_self_test(void)
@@ -247,12 +252,62 @@ static int run_self_test(void)
 
 int main(int argc, char **argv)
 {
+    char output_path[512];
+    char error_message[512];
+
     if (argc == 2 && strcmp(argv[1], "--self-test") == 0) {
         return run_self_test();
     }
 
     if (argc == 2 && strcmp(argv[1], "--pong") == 0) {
         return ecsvm_run_pong();
+    }
+
+    if (argc == 3 && strcmp(argv[1], "build") == 0) {
+        ecsvm_status_t status;
+
+        status = ecsvm_project_build(
+            argv[2],
+            output_path,
+            sizeof(output_path),
+            error_message,
+            sizeof(error_message)
+        );
+        if (status != ECSVM_OK) {
+            fprintf(stderr, "build failed: %s\n", error_message[0] != '\0' ? error_message : ecsvm_status_string(status));
+            return 1;
+        }
+
+        printf("%s\n", output_path);
+        return 0;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "run") == 0) {
+        const char *binary_path;
+
+        if (ecsvm_path_is_directory(argv[2])) {
+            ecsvm_status_t status;
+
+            status = ecsvm_project_build(
+                argv[2],
+                output_path,
+                sizeof(output_path),
+                error_message,
+                sizeof(error_message)
+            );
+            if (status != ECSVM_OK) {
+                fprintf(stderr, "build failed: %s\n", error_message[0] != '\0' ? error_message : ecsvm_status_string(status));
+                return 1;
+            }
+            binary_path = output_path;
+        } else if (ecsvm_path_has_extension(argv[2], ".ecsbin")) {
+            binary_path = argv[2];
+        } else {
+            fprintf(stderr, "run expects a project directory or .ecsbin file\n");
+            return 1;
+        }
+
+        return ecsvm_run_pong_binary(binary_path);
     }
 
     print_usage(argv[0]);

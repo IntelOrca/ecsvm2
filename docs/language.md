@@ -48,7 +48,8 @@ struct vec2 {
 ### Component
 
 ```ecs
-component velocity {
+[core.Component]
+struct velocity {
     x: f32;
     y: f32;
 }
@@ -57,6 +58,7 @@ component velocity {
 - Components are plain data in the MVP subset.
 - Each component resolves to one runtime component registration.
 - Storage is contiguous only in the first runtime implementation.
+- The initial frontend also accepts the legacy `component velocity { ... }` shorthand and normalizes it to the same component definition.
 
 ### Constant
 

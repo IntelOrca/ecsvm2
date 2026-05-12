@@ -469,6 +469,21 @@ ecsvm_component_id_t ecsvm_engine_hierarchy_component(const ecsvm_engine_t *engi
     return engine->hierarchy_component;
 }
 
+ecsvm_component_id_t ecsvm_engine_find_component(
+    const ecsvm_engine_t *engine,
+    const char *name
+)
+{
+    ptrdiff_t index;
+
+    index = ecsvm_find_component_index_by_name(engine, name);
+    if (index < 0) {
+        return ECSVM_INVALID_COMPONENT;
+    }
+
+    return (ecsvm_component_id_t)((size_t)index + 1u);
+}
+
 ecsvm_status_t ecsvm_engine_register_component(
     ecsvm_engine_t *engine,
     const ecsvm_component_desc_t *desc,

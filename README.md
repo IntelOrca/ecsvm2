@@ -8,6 +8,7 @@ This repository currently contains:
 - a buildable runtime core with entities, components, systems, blobs/strings, and the built-in `core.*` components
 - SDL3-backed native systems for windowing and shape rendering
 - a native C pong demo in `src/pong.c`
+- a source-project frontend that builds `.ecs` component declarations into `.ecsbin` plus generated `types.h`
 
 ## Build
 
@@ -15,6 +16,8 @@ This repository currently contains:
 ./tools/build.sh
 ./build/ecsvm --self-test
 ./build/ecsvm --pong
+./build/ecsvm build examples/pong
+./build/ecsvm run examples/pong
 ```
 
 If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building.
@@ -30,10 +33,11 @@ If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building
 
 ## Current scope
 
-The current implementation covers phases 1-3 of the plan and adds a native SDL3 demo path:
+The current implementation covers phases 1-4 of the plan and adds a native SDL3 demo path:
 - define the MVP boundaries
 - create the initial project skeleton
 - implement the runtime core
+- add a first `.ecs` frontend slice for component compilation and `.ecsbin` loading
 - exercise the runtime with a pong game built through native C systems and components
 
-Project-folder loading, `.ecsar` loading, the `.ecs` frontend, managed-system execution, and hot reload remain later phases.
+Managed-system execution, `.ecsar` loading, and hot reload remain later phases.

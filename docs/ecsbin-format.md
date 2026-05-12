@@ -27,6 +27,7 @@
 ## Struct Definitions
 - type_id: uint32 (type reference id)
 - flags: uint32
+  - bit 0 (`0x1`) marks a component struct
 - field_start: uint32 (field reference id)
 - field_count: uint32
 - attribute_start: uint32 (attribute reference id)
@@ -44,3 +45,5 @@
 ## Blobs
 - offset: uint64
 - length: uint64
+
+Blob table entries are followed by the raw blob payload region. Each blob `offset` is relative to the start of that payload region.

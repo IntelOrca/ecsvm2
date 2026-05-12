@@ -1,0 +1,3 @@
+name = "pong"
+version = "0.1.0"
+entry = "src/systems/pong.ecs"

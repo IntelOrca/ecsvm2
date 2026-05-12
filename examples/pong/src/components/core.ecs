@@ -1,0 +1,26 @@
+namespace core {
+    struct vec2 {
+        x: f32;
+        y: f32;
+    }
+
+    struct vec4 {
+        x: f32;
+        y: f32;
+        z: f32;
+        w: f32;
+    }
+
+    [core.Component]
+    struct transform {
+        position: vec2;
+        scale: vec2;
+        rotation: f32;
+    }
+
+    [core.Component]
+    struct graphics_shape {
+        color: vec4;
+        kind: i32;
+    }
+}

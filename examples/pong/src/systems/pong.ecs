@@ -1,0 +1,5 @@
+namespace pong {
+    system Update {
+        // Native systems are still implemented in C for this slice.
+    }
+}

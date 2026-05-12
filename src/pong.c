@@ -1,4 +1,5 @@
 #include "ecsvm/component.h"
+#include "ecsvm/ecsbin.h"
 #include "ecsvm/ecsvm.h"
 #include "ecsvm/system_renderer.h"
 #include "ecsvm/system_window.h"
@@ -334,6 +335,96 @@ static ecsvm_status_t pong_register_components(ecsvm_engine_t *engine, pong_stat
     return ecsvm_engine_register_component(engine, &desc, &state->velocity_component);
 }
 
+static ecsvm_status_t pong_bind_loaded_component(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    const char *qualified_name,
+    size_t expected_size,
+    ecsvm_component_id_t *out_component
+)
+{
+    const ecsvm_ecsbin_struct_def_t *definition;
+    ecsvm_component_id_t component_id;
+
+    definition = ecsvm_ecsbin_find_struct(module, qualified_name);
+    if (definition == NULL || !ecsvm_ecsbin_struct_is_component(module, definition)) {
+        return ECSVM_ERROR_NOT_FOUND;
+    }
+
+    if (definition->size != expected_size) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    component_id = ecsvm_engine_find_component(engine, qualified_name);
+    if (component_id == ECSVM_INVALID_COMPONENT) {
+        return ECSVM_ERROR_NOT_FOUND;
+    }
+
+    *out_component = component_id;
+    return ECSVM_OK;
+}
+
+static ecsvm_status_t pong_register_loaded_components(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    pong_state_t *state
+)
+{
+    ecsvm_status_t status;
+
+    status = ecsvm_engine_register_builtin_components(engine);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    state->core.hierarchy = ecsvm_engine_hierarchy_component(engine);
+    status = ecsvm_ecsbin_register_components(engine, module);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    status = pong_bind_loaded_component(
+        engine,
+        module,
+        "core.transform",
+        sizeof(ecsvm_transform_component_t),
+        &state->core.transform
+    );
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    status = pong_bind_loaded_component(
+        engine,
+        module,
+        "core.graphics_shape",
+        sizeof(ecsvm_graphics_shape_component_t),
+        &state->core.graphics_shape
+    );
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    status = pong_bind_loaded_component(
+        engine,
+        module,
+        "pong.paddle",
+        sizeof(pong_paddle_component_t),
+        &state->paddle_component
+    );
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    return pong_bind_loaded_component(
+        engine,
+        module,
+        "pong.velocity",
+        sizeof(pong_velocity_component_t),
+        &state->velocity_component
+    );
+}
+
 static int pong_spawn_world(ecsvm_engine_t *engine, pong_state_t *state, int width, int height)
 {
     ecsvm_entity_t entity;
@@ -438,7 +529,7 @@ static int pong_spawn_world(ecsvm_engine_t *engine, pong_state_t *state, int wid
     return 1;
 }
 
-int ecsvm_run_pong(void)
+static int pong_run(const ecsvm_ecsbin_module_t *module)
 {
     ecsvm_engine_t *engine;
     ecsvm_window_config_t window_config;
@@ -471,7 +562,9 @@ int ecsvm_run_pong(void)
         return 1;
     }
 
-    status = pong_register_components(engine, &state);
+    status = module == NULL ?
+        pong_register_components(engine, &state) :
+        pong_register_loaded_components(engine, module, &state);
     if (status != ECSVM_OK) {
         fprintf(stderr, "failed to register pong components: %s\n", ecsvm_status_string(status));
         ecsvm_window_system_destroy(window_system);
@@ -545,5 +638,34 @@ int ecsvm_run_pong(void)
     ecsvm_renderer_system_destroy(renderer_system);
     ecsvm_window_system_destroy(window_system);
     ecsvm_engine_destroy(engine);
+    return exit_code;
+}
+
+int ecsvm_run_pong(void)
+{
+    return pong_run(NULL);
+}
+
+int ecsvm_run_pong_binary(const char *ecsbin_path)
+{
+    ecsvm_ecsbin_module_t module;
+    char error_message[512];
+    ecsvm_status_t status;
+    int exit_code;
+
+    memset(&module, 0, sizeof(module));
+    status = ecsvm_ecsbin_load(
+        ecsbin_path,
+        &module,
+        error_message,
+        sizeof(error_message)
+    );
+    if (status != ECSVM_OK) {
+        fprintf(stderr, "failed to load ecsbin: %s\n", error_message[0] != '\0' ? error_message : ecsvm_status_string(status));
+        return 1;
+    }
+
+    exit_code = pong_run(&module);
+    ecsvm_ecsbin_unload(&module);
     return exit_code;
 }

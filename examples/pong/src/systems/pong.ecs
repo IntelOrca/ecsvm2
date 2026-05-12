@@ -1,5 +1,237 @@
 namespace pong {
-    system Update {
-        // Native systems are still implemented in C for this slice.
+    const PONG_WINDOW_WIDTH: i32 = 960;
+    const PONG_WINDOW_HEIGHT: i32 = 540;
+    const PADDLE_SPEED: f32 = 500.0;
+    const BALL_SPEED: f32 = 420.0;
+    const BALL_SPEED_Y_SCALE: f32 = 0.35;
+    const BALL_BOUNCE_Y_SCALE: f32 = 0.75;
+    const PADDLE_HALF_HEIGHT: f32 = 50.0;
+    const PADDLE_WIDTH: f32 = 16.0;
+    const PADDLE_HEIGHT: f32 = 100.0;
+    const BALL_SIZE: f32 = 16.0;
+    const CENTER_PILLAR_WIDTH: f32 = 6.0;
+    const BORDER_WIDTH: f32 = 8.0;
+    const LEFT_PADDLE_X: f32 = 40.0;
+    const RIGHT_PADDLE_X: f32 = 40.0;
+    const BALL_ROTATION_SPEED: f32 = 2.5;
+    const KEYBOARD_KIND: i32 = 1;
+
+    fn clamp(value: f32, minimum: f32, maximum: f32): f32 {
+        if (value < minimum) {
+            return minimum;
+        }
+
+        if (value > maximum) {
+            return maximum;
+        }
+
+        return value;
+    }
+
+    fn rect_left(transform: core.transform): f32 {
+        return transform.position.x - (transform.scale.x * 0.5);
+    }
+
+    fn rect_right(transform: core.transform): f32 {
+        return transform.position.x + (transform.scale.x * 0.5);
+    }
+
+    fn rect_top(transform: core.transform): f32 {
+        return transform.position.y - (transform.scale.y * 0.5);
+    }
+
+    fn rect_bottom(transform: core.transform): f32 {
+        return transform.position.y + (transform.scale.y * 0.5);
+    }
+
+    fn overlaps(a: core.transform, b: core.transform): bool {
+        if (rect_right(a) < rect_left(b)) {
+            return false;
+        }
+
+        if (rect_left(a) > rect_right(b)) {
+            return false;
+        }
+
+        if (rect_bottom(a) < rect_top(b)) {
+            return false;
+        }
+
+        if (rect_top(a) > rect_bottom(b)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    fn reset_ball(window: core.Window, ball: core.transform, velocity: pong.velocity, direction: f32) {
+        ball.position.x = window.width * 0.5;
+        ball.position.y = window.height * 0.5;
+        ball.rotation = 0.0;
+        velocity.value.x = BALL_SPEED * direction;
+        velocity.value.y = BALL_SPEED * BALL_SPEED_Y_SCALE;
+    }
+
+    fn apply_rect(
+        transform: core.transform,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        rotation: f32
+    ): core.transform {
+        transform.position.x = x;
+        transform.position.y = y;
+        transform.scale.x = width;
+        transform.scale.y = height;
+        transform.rotation = rotation;
+        return transform;
+    }
+
+    fn apply_rect_shape(
+        shape: core.graphics_shape,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32
+    ): core.graphics_shape {
+        shape.color.x = r;
+        shape.color.y = g;
+        shape.color.z = b;
+        shape.color.w = a;
+        shape.kind = 0;
+        return shape;
+    }
+
+    fn apply_paddle(
+        paddle: pong.paddle,
+        speed: f32,
+        up_key: i32,
+        down_key: i32
+    ): pong.paddle {
+        paddle.speed = speed;
+        paddle.up_key = up_key;
+        paddle.down_key = down_key;
+        return paddle;
+    }
+
+    fn apply_velocity(velocity: pong.velocity, x: f32, y: f32): pong.velocity {
+        velocity.value.x = x;
+        velocity.value.y = y;
+        return velocity;
+    }
+
+    system Bootstrap {
+        let left_wall: entity = spawn();
+        let center_line: entity = spawn();
+        let left_paddle: entity = spawn();
+        let right_paddle: entity = spawn();
+        let ball: entity = spawn();
+        let left_up_monitor: entity = spawn();
+        let left_down_monitor: entity = spawn();
+        let right_up_monitor: entity = spawn();
+        let right_down_monitor: entity = spawn();
+
+        set(left_wall, apply_rect(core.transform {}, 30.0, PONG_WINDOW_HEIGHT * 0.5, BORDER_WIDTH, PONG_WINDOW_HEIGHT * 1.0, 0.0));
+        set(left_wall, apply_rect_shape(core.graphics_shape {}, 0.2, 0.2, 0.2, 1.0));
+
+        set(center_line, apply_rect(core.transform {}, PONG_WINDOW_WIDTH * 0.5, PONG_WINDOW_HEIGHT * 0.5, CENTER_PILLAR_WIDTH, 18.0, 0.0));
+        set(center_line, apply_rect_shape(core.graphics_shape {}, 1.0, 1.0, 1.0, 0.65));
+
+        set(left_paddle, apply_rect(core.transform {}, LEFT_PADDLE_X, PONG_WINDOW_HEIGHT * 0.5, PADDLE_WIDTH, PADDLE_HEIGHT, 0.0));
+        set(left_paddle, apply_rect_shape(core.graphics_shape {}, 1.0, 1.0, 1.0, 1.0));
+        set(left_paddle, apply_paddle(pong.paddle {}, PADDLE_SPEED, 0, 1));
+
+        set(right_paddle, apply_rect(core.transform {}, PONG_WINDOW_WIDTH - RIGHT_PADDLE_X, PONG_WINDOW_HEIGHT * 0.5, PADDLE_WIDTH, PADDLE_HEIGHT, 0.0));
+        set(right_paddle, apply_rect_shape(core.graphics_shape {}, 1.0, 1.0, 1.0, 1.0));
+        set(right_paddle, apply_paddle(pong.paddle {}, PADDLE_SPEED, 2, 3));
+
+        set(ball, apply_rect(core.transform {}, PONG_WINDOW_WIDTH * 0.5, PONG_WINDOW_HEIGHT * 0.5, BALL_SIZE, BALL_SIZE, 0.0));
+        set(ball, apply_rect_shape(core.graphics_shape {}, 1.0, 0.85, 0.2, 1.0));
+        set(ball, apply_velocity(pong.velocity {}, BALL_SPEED, BALL_SPEED * BALL_SPEED_Y_SCALE));
+
+        set(left_up_monitor, core.input.InputMonitor { kind: KEYBOARD_KIND, device: 0, index: 0, value: 0.0 });
+        set(left_down_monitor, core.input.InputMonitor { kind: KEYBOARD_KIND, device: 0, index: 1, value: 0.0 });
+        set(right_up_monitor, core.input.InputMonitor { kind: KEYBOARD_KIND, device: 0, index: 2, value: 0.0 });
+        set(right_down_monitor, core.input.InputMonitor { kind: KEYBOARD_KIND, device: 0, index: 3, value: 0.0 });
+    }
+
+    system SyncWindow(window: core.Window) {
+        window.width = PONG_WINDOW_WIDTH;
+        window.height = PONG_WINDOW_HEIGHT;
+        window.delta_seconds = 1.0 / 60.0;
+        window.should_close = false;
+    }
+
+    system TrackInput(input: core.input.InputMonitor) {
+        if (input.kind == KEYBOARD_KIND) {
+            if (input.index == 0) {
+                input.value = 0.0;
+            } else if (input.index == 1) {
+                input.value = 0.0;
+            } else if (input.index == 2) {
+                input.value = 0.0;
+            } else if (input.index == 3) {
+                input.value = 0.0;
+            }
+        }
+    }
+
+    system MovePaddles(window: core.Window, paddle: pong.paddle, transform: core.transform, input: core.input.InputMonitor) {
+        let movement: f32 = 0.0;
+
+        if (input.kind == KEYBOARD_KIND && input.index == paddle.up_key && input.value > 0.0) {
+            movement = movement - (paddle.speed * window.delta_seconds);
+        }
+
+        if (input.kind == KEYBOARD_KIND && input.index == paddle.down_key && input.value > 0.0) {
+            movement = movement + (paddle.speed * window.delta_seconds);
+        }
+
+        transform.position.y = clamp(
+            transform.position.y + movement,
+            PADDLE_HALF_HEIGHT,
+            window.height - PADDLE_HALF_HEIGHT
+        );
+    }
+
+    system MoveBall(window: core.Window, transform: core.transform, velocity: pong.velocity) {
+        transform.position.x = transform.position.x + (velocity.value.x * window.delta_seconds);
+        transform.position.y = transform.position.y + (velocity.value.y * window.delta_seconds);
+        transform.rotation = transform.rotation + (window.delta_seconds * BALL_ROTATION_SPEED);
+
+        if (rect_top(transform) <= 0.0) {
+            transform.position.y = transform.scale.y * 0.5;
+            velocity.value.y = 0.0 - velocity.value.y;
+        } else if (rect_bottom(transform) >= window.height) {
+            transform.position.y = window.height - (transform.scale.y * 0.5);
+            velocity.value.y = 0.0 - velocity.value.y;
+        }
+    }
+
+    system ResolvePaddleHits(window: core.Window, ball: core.transform, velocity: pong.velocity, paddle: core.transform) {
+        if (!overlaps(ball, paddle)) {
+            return;
+        }
+
+        let offset: f32 = (ball.position.y - paddle.position.y) / (paddle.scale.y * 0.5);
+
+        if (ball.position.x < paddle.position.x) {
+            ball.position.x = paddle.position.x - (paddle.scale.x * 0.5) - (ball.scale.x * 0.5);
+            velocity.value.x = 0.0 - velocity.value.x;
+        } else {
+            ball.position.x = paddle.position.x + (paddle.scale.x * 0.5) + (ball.scale.x * 0.5);
+            velocity.value.x = 0.0 - velocity.value.x;
+        }
+
+        velocity.value.y = offset * BALL_SPEED * BALL_BOUNCE_Y_SCALE;
+    }
+
+    system ResetScoring(window: core.Window, ball: core.transform, velocity: pong.velocity) {
+        if (ball.position.x < 0.0) {
+            reset_ball(window, ball, velocity, 1.0);
+        } else if (ball.position.x > window.width) {
+            reset_ball(window, ball, velocity, -1.0);
+        }
     }
 }

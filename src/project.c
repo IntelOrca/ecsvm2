@@ -39,6 +39,18 @@ typedef enum ecsvm_token_kind {
     ECSVM_TOKEN_DOT,
     ECSVM_TOKEN_COMMA,
     ECSVM_TOKEN_EQUAL,
+    ECSVM_TOKEN_BANG,
+    ECSVM_TOKEN_PLUS,
+    ECSVM_TOKEN_MINUS,
+    ECSVM_TOKEN_STAR,
+    ECSVM_TOKEN_SLASH,
+    ECSVM_TOKEN_PERCENT,
+    ECSVM_TOKEN_LT,
+    ECSVM_TOKEN_GT,
+    ECSVM_TOKEN_AMPERSAND,
+    ECSVM_TOKEN_PIPE,
+    ECSVM_TOKEN_CARET,
+    ECSVM_TOKEN_TILDE,
     ECSVM_TOKEN_KEY_NAMESPACE,
     ECSVM_TOKEN_KEY_STRUCT,
     ECSVM_TOKEN_KEY_COMPONENT,
@@ -1185,6 +1197,42 @@ static int ecsvm_lex_source(
                 break;
             case '=':
                 token.kind = ECSVM_TOKEN_EQUAL;
+                break;
+            case '!':
+                token.kind = ECSVM_TOKEN_BANG;
+                break;
+            case '+':
+                token.kind = ECSVM_TOKEN_PLUS;
+                break;
+            case '-':
+                token.kind = ECSVM_TOKEN_MINUS;
+                break;
+            case '*':
+                token.kind = ECSVM_TOKEN_STAR;
+                break;
+            case '/':
+                token.kind = ECSVM_TOKEN_SLASH;
+                break;
+            case '%':
+                token.kind = ECSVM_TOKEN_PERCENT;
+                break;
+            case '<':
+                token.kind = ECSVM_TOKEN_LT;
+                break;
+            case '>':
+                token.kind = ECSVM_TOKEN_GT;
+                break;
+            case '&':
+                token.kind = ECSVM_TOKEN_AMPERSAND;
+                break;
+            case '|':
+                token.kind = ECSVM_TOKEN_PIPE;
+                break;
+            case '^':
+                token.kind = ECSVM_TOKEN_CARET;
+                break;
+            case '~':
+                token.kind = ECSVM_TOKEN_TILDE;
                 break;
             default:
                 ecsvm_set_error(error_message, error_message_capacity, "unexpected character in source file");

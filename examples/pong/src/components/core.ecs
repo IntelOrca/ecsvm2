@@ -23,4 +23,23 @@ namespace core {
         color: vec4;
         kind: i32;
     }
+
+    [core.Component]
+    struct Window {
+        width: i32;
+        height: i32;
+        delta_seconds: f32;
+        should_close: bool;
+    }
+
+}
+
+namespace core.input {
+    [core.Component]
+    struct InputMonitor {
+        kind: i32;
+        device: i32;
+        index: i32;
+        value: f32;
+    }
 }

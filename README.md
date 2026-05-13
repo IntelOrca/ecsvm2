@@ -6,21 +6,28 @@ This repository currently contains:
 - the MVP contract and draft specs in `docs/`
 - a bootstrap project layout for the runtime, tools, and examples
 - a buildable runtime core with entities, components, systems, blobs/strings, and the built-in `core.*` components
-- SDL3-backed native systems for windowing and shape rendering
-- a native C pong demo in `src/pong.c`
+- optional SDL3-backed native systems for windowing and shape rendering
+- a native C pong demo in `src/pong.c` when built with SDL3 enabled
 - a source-project frontend that builds `.ecs` component declarations into `.ecsbin` plus generated `types.h`
 
 ## Build
 
 ```sh
-./tools/build.sh
+make
 ./build/ecsvm --self-test
 ./build/ecsvm --pong
 ./build/ecsvm build examples/pong
 ./build/ecsvm run examples/pong
 ```
 
-If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building.
+Build without SDL3 by setting `ECSVM_ENABLE_SDL3=0`:
+
+```sh
+make ECSVM_ENABLE_SDL3=0
+./build/ecsvm --self-test
+```
+
+When SDL3 is enabled, `--pong` and `run examples/pong` require SDL3 to be installed. If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building.
 
 ## Layout
 
@@ -28,8 +35,8 @@ If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building
 - `include/ecsvm/` - public C API
 - `src/` - runtime implementation and CLI entry point
 - `src/pong.c` - native pong demo using only the C runtime APIs
+- `Makefile` - Linux build entry point
 - `examples/basic/` - golden-path source project skeleton
-- `tools/` - bootstrap build helper
 
 ## Current scope
 

@@ -4,12 +4,14 @@
 #include "ecsvm/system_renderer.h"
 #include "ecsvm/system_window.h"
 
+#include <stdio.h>
+#include <string.h>
+
+#if ECSVM_ENABLE_SDL3
 #include <SDL3/SDL.h>
 
 #include <math.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
 
 typedef struct pong_velocity_component {
     ecsvm_vec2_t value;
@@ -669,3 +671,26 @@ int ecsvm_run_pong_binary(const char *ecsbin_path)
     ecsvm_ecsbin_unload(&module);
     return exit_code;
 }
+#else
+static int pong_disabled(const char *mode)
+{
+    fprintf(
+        stderr,
+        "%s is unavailable because SDL3 support was disabled at compile time "
+        "(ECSVM_ENABLE_SDL3=0)\n",
+        mode
+    );
+    return 1;
+}
+
+int ecsvm_run_pong(void)
+{
+    return pong_disabled("--pong");
+}
+
+int ecsvm_run_pong_binary(const char *ecsbin_path)
+{
+    (void)ecsbin_path;
+    return pong_disabled("run");
+}
+#endif

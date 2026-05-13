@@ -1,15 +1,31 @@
-#define WIN32_LEAN_AND_MEAN
-
 #include "ecsvm/project.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
 #include <direct.h>
+#define ECSVM_PATH_SEPARATOR '\\'
+#define ecsvm_stricmp _stricmp
+#else
+#include <dirent.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#ifndef MAX_PATH
+#define MAX_PATH 4096
+#endif
+#define ECSVM_PATH_SEPARATOR '/'
+#define ecsvm_stricmp strcasecmp
+#endif
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
 
 typedef struct ecsvm_manifest {
     char *name;
@@ -750,6 +766,7 @@ static void ecsvm_manifest_free(ecsvm_manifest_t *manifest)
 
 int ecsvm_path_is_directory(const char *path)
 {
+#ifdef _WIN32
     DWORD attributes;
 
     if (path == NULL || path[0] == '\0') {
@@ -759,6 +776,37 @@ int ecsvm_path_is_directory(const char *path)
     attributes = GetFileAttributesA(path);
     return attributes != INVALID_FILE_ATTRIBUTES &&
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    struct stat status;
+
+    if (path == NULL || path[0] == '\0') {
+        return 0;
+    }
+
+    return stat(path, &status) == 0 && S_ISDIR(status.st_mode);
+#endif
+}
+
+static int ecsvm_path_exists(const char *path)
+{
+#ifdef _WIN32
+    DWORD attributes;
+
+    if (path == NULL || path[0] == '\0') {
+        return 0;
+    }
+
+    attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES;
+#else
+    struct stat status;
+
+    if (path == NULL || path[0] == '\0') {
+        return 0;
+    }
+
+    return stat(path, &status) == 0;
+#endif
 }
 
 int ecsvm_path_has_extension(const char *path, const char *extension)
@@ -770,7 +818,7 @@ int ecsvm_path_has_extension(const char *path, const char *extension)
     }
 
     dot = strrchr(path, '.');
-    return dot != NULL && _stricmp(dot, extension) == 0;
+    return dot != NULL && ecsvm_stricmp(dot, extension) == 0;
 }
 
 static int ecsvm_path_join(
@@ -798,7 +846,7 @@ static int ecsvm_path_join(
         return snprintf(buffer, buffer_capacity, "%s%s", left, right_part) > 0;
     }
 
-    return snprintf(buffer, buffer_capacity, "%s\\%s", left, right_part) > 0;
+    return snprintf(buffer, buffer_capacity, "%s%c%s", left, ECSVM_PATH_SEPARATOR, right_part) > 0;
 }
 
 static int ecsvm_read_text_file(const char *path, char **out_text, size_t *out_length)
@@ -946,6 +994,7 @@ static int ecsvm_collect_ecs_files_recursive(
     size_t error_message_capacity
 )
 {
+#ifdef _WIN32
     char search_pattern[MAX_PATH];
     WIN32_FIND_DATAA find_data;
     HANDLE handle;
@@ -993,6 +1042,54 @@ static int ecsvm_collect_ecs_files_recursive(
 
     FindClose(handle);
     return 1;
+#else
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(directory);
+    if (dir == NULL) {
+        return 1;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        char path[MAX_PATH];
+        struct stat status;
+
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        if (!ecsvm_path_join(directory, entry->d_name, path, sizeof(path))) {
+            closedir(dir);
+            ecsvm_set_error(error_message, error_message_capacity, "source path is too long");
+            return 0;
+        }
+
+        if (stat(path, &status) != 0) {
+            continue;
+        }
+
+        if (S_ISDIR(status.st_mode)) {
+            if (!ecsvm_collect_ecs_files_recursive(path, paths, error_message, error_message_capacity)) {
+                closedir(dir);
+                return 0;
+            }
+        } else if (ecsvm_path_has_extension(path, ".ecs")) {
+            char *copy;
+
+            copy = ecsvm_copy_string(path);
+            if (copy == NULL || !ecsvm_string_array_push(paths, copy)) {
+                free(copy);
+                closedir(dir);
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting source files");
+                return 0;
+            }
+        }
+    }
+
+    closedir(dir);
+    return 1;
+#endif
 }
 
 static int ecsvm_compare_strings(const void *left, const void *right)
@@ -1002,7 +1099,7 @@ static int ecsvm_compare_strings(const void *left, const void *right)
 
     left_text = (const char *const *)left;
     right_text = (const char *const *)right;
-    return _stricmp(*left_text, *right_text);
+    return ecsvm_stricmp(*left_text, *right_text);
 }
 
 static int ecsvm_is_identifier_start(int ch)
@@ -1881,23 +1978,23 @@ static size_t ecsvm_builtin_layout(const char *qualified_name, size_t *out_align
     alignment = 0u;
     if (strcmp(qualified_name, "core.Entity") == 0) {
         size = sizeof(uint32_t);
-        alignment = _Alignof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
     } else if (strcmp(qualified_name, "core.Int32") == 0) {
         size = sizeof(int32_t);
-        alignment = _Alignof(int32_t);
+        alignment = ECSVM_ALIGNOF(int32_t);
     } else if (strcmp(qualified_name, "core.UInt32") == 0) {
         size = sizeof(uint32_t);
-        alignment = _Alignof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
     } else if (strcmp(qualified_name, "core.Float32") == 0) {
         size = sizeof(float);
-        alignment = _Alignof(float);
+        alignment = ECSVM_ALIGNOF(float);
     } else if (strcmp(qualified_name, "core.Blob") == 0 ||
                strcmp(qualified_name, "core.String") == 0) {
         size = sizeof(uint32_t);
-        alignment = _Alignof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
     } else if (strcmp(qualified_name, "core.Bool") == 0) {
         size = sizeof(unsigned char);
-        alignment = _Alignof(unsigned char);
+        alignment = ECSVM_ALIGNOF(unsigned char);
     }
 
     if (out_alignment != NULL) {
@@ -2803,7 +2900,11 @@ static int ecsvm_write_types_header(
 
 static int ecsvm_ensure_directory(const char *path)
 {
+#ifdef _WIN32
     if (_mkdir(path) == 0 || errno == EEXIST) {
+#else
+    if (mkdir(path, 0777) == 0 || errno == EEXIST) {
+#endif
         return 1;
     }
 
@@ -2831,6 +2932,8 @@ ecsvm_status_t ecsvm_project_build(
     char src_path[MAX_PATH];
     char entry_path[MAX_PATH];
     char out_path[MAX_PATH];
+    char ecsbin_name[MAX_PATH];
+    char ecsbin_path[MAX_PATH];
     char types_path[MAX_PATH];
     size_t source_index;
     ecsvm_status_t result;
@@ -2857,7 +2960,7 @@ ecsvm_status_t ecsvm_project_build(
     }
 
     if (!ecsvm_path_join(project_path, manifest.entry, entry_path, sizeof(entry_path)) ||
-        GetFileAttributesA(entry_path) == INVALID_FILE_ATTRIBUTES) {
+        !ecsvm_path_exists(entry_path)) {
         ecsvm_manifest_free(&manifest);
         ecsvm_set_error(error_message, error_message_capacity, "manifest entry file does not exist");
         return ECSVM_ERROR_ARGUMENT;
@@ -2920,8 +3023,9 @@ ecsvm_status_t ecsvm_project_build(
         goto cleanup;
     }
 
-    if (snprintf(types_path, sizeof(types_path), "%s\\types.h", out_path) <= 0 ||
-        snprintf(out_path, sizeof(out_path), "%s\\%s.ecsbin", out_path, manifest.name) <= 0) {
+    if (!ecsvm_path_join(out_path, "types.h", types_path, sizeof(types_path)) ||
+        snprintf(ecsbin_name, sizeof(ecsbin_name), "%s.ecsbin", manifest.name) <= 0 ||
+        !ecsvm_path_join(out_path, ecsbin_name, ecsbin_path, sizeof(ecsbin_path))) {
         ecsvm_set_error(error_message, error_message_capacity, "output path is too long");
         result = ECSVM_ERROR_ARGUMENT;
         goto cleanup;
@@ -2937,7 +3041,7 @@ ecsvm_status_t ecsvm_project_build(
             &struct_defs
         ) ||
         !ecsvm_write_ecsbin_file(
-            out_path,
+            ecsbin_path,
             &blobs,
             &type_refs,
             &field_refs,
@@ -2952,7 +3056,7 @@ ecsvm_status_t ecsvm_project_build(
     }
 
     if (out_ecsbin_path != NULL && out_ecsbin_path_capacity > 0u) {
-        (void)snprintf(out_ecsbin_path, out_ecsbin_path_capacity, "%s", out_path);
+        (void)snprintf(out_ecsbin_path, out_ecsbin_path_capacity, "%s", ecsbin_path);
     }
 
     result = ECSVM_OK;

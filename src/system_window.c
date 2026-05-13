@@ -4,14 +4,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <SDL3/SDL.h>
 
 struct ecsvm_window_system {
     char *title;
     int width;
     int height;
-    SDL_WindowFlags window_flags;
-    SDL_Window *window;
-    SDL_Renderer *renderer;
+    uint64_t window_flags;
+    ecsvm_native_window_t *window;
+    ecsvm_native_renderer_t *renderer;
     Uint64 previous_counter;
     float delta_seconds;
     bool initialized;
@@ -56,7 +57,7 @@ static bool window_initialize(ecsvm_context_t *ctx, ecsvm_window_system_t *syste
             system->title,
             system->width,
             system->height,
-            system->window_flags,
+            (SDL_WindowFlags)system->window_flags,
             &system->window,
             &system->renderer
         )) {
@@ -224,7 +225,7 @@ int ecsvm_window_system_size(const ecsvm_window_system_t *system, int *width, in
     return 1;
 }
 
-SDL_Window *ecsvm_window_system_window(const ecsvm_window_system_t *system)
+ecsvm_native_window_t *ecsvm_window_system_window(const ecsvm_window_system_t *system)
 {
     if (system == NULL) {
         return NULL;
@@ -233,7 +234,7 @@ SDL_Window *ecsvm_window_system_window(const ecsvm_window_system_t *system)
     return system->window;
 }
 
-SDL_Renderer *ecsvm_window_system_renderer(const ecsvm_window_system_t *system)
+ecsvm_native_renderer_t *ecsvm_window_system_renderer(const ecsvm_window_system_t *system)
 {
     if (system == NULL) {
         return NULL;

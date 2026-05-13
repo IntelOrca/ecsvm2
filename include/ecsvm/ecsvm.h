@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef ECSVM_ENABLE_SDL3
+#define ECSVM_ENABLE_SDL3 1
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -160,4 +164,3 @@ const char *ecsvm_status_string(ecsvm_status_t status);
 #endif
 
 #endif
-

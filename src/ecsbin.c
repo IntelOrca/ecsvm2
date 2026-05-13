@@ -4,6 +4,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+typedef __int64 ecsvm_file_offset_t;
+#define ECSVM_FTELL _ftelli64
+#define ECSVM_FSEEK _fseeki64
+#else
+typedef long ecsvm_file_offset_t;
+#define ECSVM_FTELL ftell
+#define ECSVM_FSEEK fseek
+#endif
+
+#define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
+
 typedef struct ecsvm_ecsbin_header {
     char magic[5];
     unsigned char version[3];
@@ -101,24 +113,24 @@ static char *ecsvm_ecsbin_copy_string_range(const unsigned char *data, size_t le
 
 static uint64_t ecsvm_ecsbin_file_size(FILE *file)
 {
-    __int64 current;
-    __int64 end;
+    ecsvm_file_offset_t current;
+    ecsvm_file_offset_t end;
 
-    current = _ftelli64(file);
+    current = ECSVM_FTELL(file);
     if (current < 0) {
         return 0u;
     }
 
-    if (_fseeki64(file, 0, SEEK_END) != 0) {
+    if (ECSVM_FSEEK(file, 0, SEEK_END) != 0) {
         return 0u;
     }
 
-    end = _ftelli64(file);
+    end = ECSVM_FTELL(file);
     if (end < 0) {
         return 0u;
     }
 
-    if (_fseeki64(file, current, SEEK_SET) != 0) {
+    if (ECSVM_FSEEK(file, current, SEEK_SET) != 0) {
         return 0u;
     }
 
@@ -127,7 +139,7 @@ static uint64_t ecsvm_ecsbin_file_size(FILE *file)
 
 static int ecsvm_ecsbin_seek(FILE *file, uint64_t offset)
 {
-    return _fseeki64(file, (__int64)offset, SEEK_SET) == 0;
+    return ECSVM_FSEEK(file, (ecsvm_file_offset_t)offset, SEEK_SET) == 0;
 }
 
 static int ecsvm_ecsbin_read_exact(FILE *file, void *data, size_t size)
@@ -169,23 +181,23 @@ static size_t ecsvm_ecsbin_builtin_layout(
 
     if (strcmp(qualified_name, "core.Entity") == 0) {
         size = sizeof(ecsvm_entity_t);
-        alignment = _Alignof(ecsvm_entity_t);
+        alignment = ECSVM_ALIGNOF(ecsvm_entity_t);
     } else if (strcmp(qualified_name, "core.Int32") == 0) {
         size = sizeof(int32_t);
-        alignment = _Alignof(int32_t);
+        alignment = ECSVM_ALIGNOF(int32_t);
     } else if (strcmp(qualified_name, "core.UInt32") == 0) {
         size = sizeof(uint32_t);
-        alignment = _Alignof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
     } else if (strcmp(qualified_name, "core.Float32") == 0) {
         size = sizeof(float);
-        alignment = _Alignof(float);
+        alignment = ECSVM_ALIGNOF(float);
     } else if (strcmp(qualified_name, "core.Blob") == 0 ||
                strcmp(qualified_name, "core.String") == 0) {
         size = sizeof(ecsvm_blob_t);
-        alignment = _Alignof(ecsvm_blob_t);
+        alignment = ECSVM_ALIGNOF(ecsvm_blob_t);
     } else if (strcmp(qualified_name, "core.Bool") == 0) {
         size = sizeof(unsigned char);
-        alignment = _Alignof(unsigned char);
+        alignment = ECSVM_ALIGNOF(unsigned char);
     }
 
     if (out_alignment != NULL) {

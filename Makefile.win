@@ -2,6 +2,9 @@ CC=cl
 OUTDIR=build
 OBJDIR=obj
 TARGET=$(OUTDIR)\ecsvm.exe
+!IFNDEF ECSVM_ENABLE_SDL3
+ECSVM_ENABLE_SDL3=1
+!ENDIF
 SDL3_INCDIR=dependencies\include
 SDL3_LIBDIR=dependencies\lib\x64
 SDL3_DLL=dependencies\lib\x64\SDL3.dll
@@ -11,23 +14,36 @@ OBJFILES=$(OBJDIR)\component.obj \
 	$(OBJDIR)\ecsvm.obj \
 	$(OBJDIR)\main.obj \
 	$(OBJDIR)\project.obj \
-	$(OBJDIR)\pong.obj \
-	$(OBJDIR)\system_renderer.obj \
-	$(OBJDIR)\system_window.obj
+	$(OBJDIR)\pong.obj
 
 LEGACYOBJS=component.obj \
 	ecsbin.obj \
 	ecsvm.obj \
 	main.obj \
 	project.obj \
-	pong.obj \
+	pong.obj
+
+!IF "$(ECSVM_ENABLE_SDL3)" == "1"
+SDL3_CFLAGS=/I$(SDL3_INCDIR)
+SDL3_LDFLAGS=/LIBPATH:$(SDL3_LIBDIR) SDL3.lib
+SDL3_OBJFILES=$(OBJDIR)\system_renderer.obj \
+	$(OBJDIR)\system_window.obj
+LEGACYOBJS=$(LEGACYOBJS) \
 	system_renderer.obj \
 	system_window.obj
-
-CFLAGS=/nologo /TC /std:c11 /W4 /WX /Iinclude /I$(SDL3_INCDIR) /D_CRT_SECURE_NO_WARNINGS
-LDFLAGS=/link /NOLOGO /OUT:$(TARGET) /LIBPATH:$(SDL3_LIBDIR) SDL3.lib
-
 all: purgelegacyobjs $(TARGET) copydll
+!ELSE
+SDL3_CFLAGS=
+SDL3_LDFLAGS=
+SDL3_OBJFILES=
+all: purgelegacyobjs $(TARGET)
+!ENDIF
+
+OBJFILES=$(OBJFILES) \
+	$(SDL3_OBJFILES)
+
+CFLAGS=/nologo /TC /std:c11 /W4 /WX /Iinclude $(SDL3_CFLAGS) /D_CRT_SECURE_NO_WARNINGS /DECSVM_ENABLE_SDL3=$(ECSVM_ENABLE_SDL3)
+LDFLAGS=/link /NOLOGO /OUT:$(TARGET) $(SDL3_LDFLAGS)
 
 purgelegacyobjs:
 	@if exist component.obj del /Q component.obj
@@ -36,8 +52,10 @@ purgelegacyobjs:
 	@if exist main.obj del /Q main.obj
 	@if exist project.obj del /Q project.obj
 	@if exist pong.obj del /Q pong.obj
+!IF "$(ECSVM_ENABLE_SDL3)" == "1"
 	@if exist system_renderer.obj del /Q system_renderer.obj
 	@if exist system_window.obj del /Q system_window.obj
+!ENDIF
 
 $(TARGET): $(OBJFILES)
 	@if not exist $(OUTDIR) mkdir $(OUTDIR)
@@ -67,6 +85,7 @@ $(OBJDIR)\pong.obj: src\pong.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
+!IF "$(ECSVM_ENABLE_SDL3)" == "1"
 $(OBJDIR)\system_renderer.obj: src\system_renderer.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
@@ -74,9 +93,12 @@ $(OBJDIR)\system_renderer.obj: src\system_renderer.c
 $(OBJDIR)\system_window.obj: src\system_window.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
+!ENDIF
 
+!IF "$(ECSVM_ENABLE_SDL3)" == "1"
 copydll: $(TARGET)
 	@copy /Y $(SDL3_DLL) $(OUTDIR)\SDL3.dll >NUL
+!ENDIF
 
 clean:
 	@if exist $(OUTDIR)\ecsvm.exe del /Q $(OUTDIR)\ecsvm.exe
@@ -90,4 +112,3 @@ clean:
 	@if exist pong.obj del /Q pong.obj
 	@if exist system_renderer.obj del /Q system_renderer.obj
 	@if exist system_window.obj del /Q system_window.obj
-

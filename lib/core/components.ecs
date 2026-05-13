@@ -1,0 +1,58 @@
+namespace core {
+    [Alias("i32")]
+    struct Int32;
+
+    [Alias("f32")]
+    struct Float32;
+
+    [Alias("vec2")]
+    struct Vector2 {
+        x: f32;
+        y: f32;
+    }
+
+    [Alias("vec4")]
+    struct Vector4 {
+        x: f32;
+        y: f32;
+        z: f32;
+        w: f32;
+    }
+
+    /**
+     * Defines a transformation of an entity in 2D space.
+     */
+    component Transform {
+        position: vec2;
+        scale: vec2;
+        rotation: f32;
+    }
+
+    namespace graphics {
+        /**
+        * Renders a geometric shape for an entity.
+        */
+        component GraphicsShape {
+            color: vec4;
+            kind: i32;
+        }
+    }
+
+    namespace input {
+        component InputMonitor {
+            kind: i32;
+            device: i32;
+            index: i32;
+            value: f32;
+        }
+    }
+
+    namespace ui {
+        component Window {
+            width: i32;
+            height: i32;
+            delta_seconds: f32;
+            should_close: bool;
+        }
+    }
+}

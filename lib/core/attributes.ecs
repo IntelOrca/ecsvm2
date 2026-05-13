@@ -1,0 +1,24 @@
+namespace core {
+    /**
+     * Specifies an alias for a type.
+     * Internally used to map built in keywords to types.
+     */
+    attribute Alias {
+        identifier: string;
+    }
+
+    /**
+     * Specifies that a struct is an attribute.
+     */
+    attribute Attribute;
+
+    /**
+     * Specifies that a struct is a component.
+     */
+    attribute Component;
+
+    /**
+     * Marks the type or field as deprecated. A warning will be emitted when used.
+     */
+    attribute Deprecated;
+}

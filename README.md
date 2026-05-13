@@ -18,6 +18,8 @@ make
 ./build/ecsvm --pong
 ./build/ecsvm build examples/pong
 ./build/ecsvm run examples/pong
+./build/ecsvm decompile examples/pong/out/pong.ecsbin
+./build/ecsvm inspect examples/pong/out/pong.ecsbin
 ```
 
 Build without SDL3 by setting `ECSVM_ENABLE_SDL3=0`:

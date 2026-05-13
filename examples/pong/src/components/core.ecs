@@ -11,21 +11,18 @@ namespace core {
         w: f32;
     }
 
-    [core.Component]
-    struct transform {
+    component Transform {
         position: vec2;
         scale: vec2;
         rotation: f32;
     }
 
-    [core.Component]
-    struct graphics_shape {
+    component GraphicsShape {
         color: vec4;
         kind: i32;
     }
 
-    [core.Component]
-    struct Window {
+    component Window {
         width: i32;
         height: i32;
         delta_seconds: f32;
@@ -35,8 +32,7 @@ namespace core {
 }
 
 namespace core.input {
-    [core.Component]
-    struct InputMonitor {
+    component InputMonitor {
         kind: i32;
         device: i32;
         index: i32;

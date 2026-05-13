@@ -48,8 +48,7 @@ struct vec2 {
 ### Component
 
 ```ecs
-[core.Component]
-struct velocity {
+component velocity {
     x: f32;
     y: f32;
 }
@@ -58,7 +57,6 @@ struct velocity {
 - Components are plain data in the MVP subset.
 - Each component resolves to one runtime component registration.
 - Storage is contiguous only in the first runtime implementation.
-- The initial frontend also accepts the legacy `component velocity { ... }` shorthand and normalizes it to the same component definition.
 
 ### Constant
 
@@ -82,11 +80,23 @@ system Gravity {
 }
 ```
 
-The more compact entity-filter syntax is reserved in the spec but deferred for initial implementation:
+Systems may take **zero or one** parameter.
+
+- If present, the single parameter must be `core.Entity`.
+- Components for that entity are read via index syntax:
 
 ```ecs
-system Gravity(entity: entity(app.body2d)) {
-    // deferred
+system MoveBall(ball: core.Entity) {
+    let transform: core.transform = ball[core.transform];
+    let velocity: app.velocity = ball[app.velocity];
+}
+```
+
+- Components on other entities are retrieved through core lookup helpers (for example `getFirstComponent<T>()`):
+
+```ecs
+system MoveBall(ball: core.Entity) {
+    let window: core.Window = getFirstComponent<core.Window>();
 }
 ```
 
@@ -112,4 +122,3 @@ The following features are valid design targets but not part of the first implem
 - shorthand accessor bodies
 - the full iteration/filter sugar for systems
 - native interop declarations in `.ecs`
-

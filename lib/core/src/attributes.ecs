@@ -1,7 +1,7 @@
 namespace core {
     /**
      * Specifies an alias for a type.
-     * Internally used to map built in keywords to types.
+     * Internally used to map source keywords to canonical types.
      */
     attribute Alias {
         identifier: string;

@@ -2,6 +2,8 @@ CC ?= cc
 BUILD_DIR := build
 OBJ_DIR := obj
 TARGET := $(BUILD_DIR)/ecsvm
+CORE_PROJECT := lib/core
+CORE_ECSBIN := $(CORE_PROJECT)/out/core.ecsbin
 
 ECSVM_ENABLE_SDL3 ?= 1
 
@@ -62,7 +64,7 @@ LDLIBS += $(SDL3_LIBS)
 
 .PHONY: all clean
 
-all: $(TARGET)
+all: $(TARGET) $(CORE_ECSBIN)
 
 $(TARGET): $(OBJS) | $(BUILD_DIR)
 	$(CC) $(OBJS) -o $@ $(LDLIBS)
@@ -73,5 +75,8 @@ $(OBJ_DIR)/%.o: src/%.c | $(OBJ_DIR)
 $(BUILD_DIR) $(OBJ_DIR):
 	mkdir -p $@
 
+$(CORE_ECSBIN): $(TARGET) $(wildcard $(CORE_PROJECT)/src/*.ecs) $(CORE_PROJECT)/project.toml
+	./$(TARGET) build $(CORE_PROJECT) > /dev/null
+
 clean:
-	rm -rf $(BUILD_DIR) $(OBJ_DIR)
+	rm -rf $(BUILD_DIR) $(OBJ_DIR) $(CORE_PROJECT)/out

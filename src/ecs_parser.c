@@ -490,9 +490,11 @@ static int ecsvm_parser_parse_namespace(
     return ecsvm_parser_expect(parser, ECSVM_TOKEN_RBRACE, error_message, error_message_capacity);
 }
 
-static int ecsvm_parser_add_component_attribute(
+static int ecsvm_parser_add_implicit_attribute(
     ecsvm_syntax_node_array_t *nodes,
     size_t struct_index,
+    int is_component,
+    int is_attribute,
     char *error_message,
     size_t error_message_capacity
 )
@@ -506,12 +508,15 @@ static int ecsvm_parser_add_component_attribute(
     attribute.token_end = 0u;
     attribute.name_start = 0u;
     attribute.name_end = 0u;
+    attribute.is_component = is_component;
+    attribute.is_attribute = is_attribute;
     if (!ecsvm_syntax_node_array_push(nodes, attribute, &attribute_index)) {
         ecsvm_set_error(error_message, error_message_capacity, "out of memory while building syntax tree");
         return 0;
     }
 
-    nodes->items[struct_index].is_component = 1;
+    nodes->items[struct_index].is_component = is_component;
+    nodes->items[struct_index].is_attribute = is_attribute;
     ecsvm_syntax_node_add_child(nodes, struct_index, attribute_index);
     return 1;
 }
@@ -521,6 +526,7 @@ static int ecsvm_parser_parse_struct_like(
     ecsvm_syntax_node_array_t *nodes,
     size_t parent_index,
     int implicit_component,
+    int implicit_attribute,
     char *error_message,
     size_t error_message_capacity
 )
@@ -532,6 +538,7 @@ static int ecsvm_parser_parse_struct_like(
     struct_node.kind = ECSVM_SYNTAX_STRUCT;
     struct_node.token_start = parser->index - 1u;
     struct_node.is_component = implicit_component;
+    struct_node.is_attribute = implicit_attribute;
     if (!ecsvm_parser_parse_qualified_name(
             parser,
             &struct_node.name_start,
@@ -548,18 +555,30 @@ static int ecsvm_parser_parse_struct_like(
     }
 
     ecsvm_syntax_node_add_child(nodes, parent_index, struct_index);
-    if (implicit_component &&
-        !ecsvm_parser_add_component_attribute(nodes, struct_index, error_message, error_message_capacity)) {
-        return 0;
-    }
-
-    if (!ecsvm_parser_parse_struct_body(
-            parser,
+    if ((implicit_component || implicit_attribute) &&
+        !ecsvm_parser_add_implicit_attribute(
             nodes,
             struct_index,
+            implicit_component,
+            implicit_attribute,
             error_message,
             error_message_capacity
         )) {
+        return 0;
+    }
+
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_SEMICOLON)) {
+        nodes->items[struct_index].token_end = parser->index - 1u;
+        return 1;
+    }
+
+    if (!ecsvm_parser_parse_struct_body(
+             parser,
+             nodes,
+             struct_index,
+             error_message,
+             error_message_capacity
+         )) {
         return 0;
     }
 
@@ -587,8 +606,72 @@ static int ecsvm_parser_parse_attribute(
             &attribute.name_end,
             error_message,
             error_message_capacity
-        ) ||
-        !ecsvm_parser_expect(parser, ECSVM_TOKEN_RBRACKET, error_message, error_message_capacity)) {
+        )) {
+        return 0;
+    }
+
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_LPAREN)) {
+        size_t value_start;
+        size_t value_end;
+        size_t depth_paren;
+        size_t depth_bracket;
+        size_t depth_brace;
+
+        value_start = parser->index;
+        value_end = parser->index;
+        depth_paren = 0u;
+        depth_bracket = 0u;
+        depth_brace = 0u;
+        while (ecsvm_parser_current(parser)->kind != ECSVM_TOKEN_EOF) {
+            ecsvm_token_kind_t kind;
+
+            kind = ecsvm_parser_current(parser)->kind;
+            if (depth_paren == 0u &&
+                depth_bracket == 0u &&
+                depth_brace == 0u &&
+                kind == ECSVM_TOKEN_RPAREN) {
+                break;
+            }
+
+            if (kind == ECSVM_TOKEN_LPAREN) {
+                depth_paren += 1u;
+            } else if (kind == ECSVM_TOKEN_RPAREN) {
+                if (depth_paren == 0u) {
+                    break;
+                }
+                depth_paren -= 1u;
+            } else if (kind == ECSVM_TOKEN_LBRACKET) {
+                depth_bracket += 1u;
+            } else if (kind == ECSVM_TOKEN_RBRACKET) {
+                if (depth_bracket == 0u) {
+                    break;
+                }
+                depth_bracket -= 1u;
+            } else if (kind == ECSVM_TOKEN_LBRACE) {
+                depth_brace += 1u;
+            } else if (kind == ECSVM_TOKEN_RBRACE) {
+                if (depth_brace == 0u) {
+                    break;
+                }
+                depth_brace -= 1u;
+            }
+
+            value_end = parser->index;
+            parser->index += 1u;
+        }
+
+        if (value_start > value_end) {
+            ecsvm_set_error(error_message, error_message_capacity, "expected attribute value");
+            return 0;
+        }
+        attribute.value_start = value_start;
+        attribute.value_end = value_end;
+        if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_RPAREN, error_message, error_message_capacity)) {
+            return 0;
+        }
+    }
+
+    if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_RBRACKET, error_message, error_message_capacity)) {
         return 0;
     }
 
@@ -660,15 +743,50 @@ static int ecsvm_parser_parse_declaration(
             }
         }
 
-        if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_KEY_STRUCT, error_message, error_message_capacity) ||
-            !ecsvm_parser_parse_qualified_name(
+        if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_COMPONENT)) {
+            nodes->items[struct_index].is_component = 1;
+            if (!ecsvm_parser_add_implicit_attribute(
+                    nodes,
+                    struct_index,
+                    1,
+                    0,
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+        } else if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_ATTRIBUTE)) {
+            nodes->items[struct_index].is_attribute = 1;
+            if (!ecsvm_parser_add_implicit_attribute(
+                    nodes,
+                    struct_index,
+                    0,
+                    1,
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+        } else if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_KEY_STRUCT, error_message, error_message_capacity)) {
+            return 0;
+        }
+
+        if (!ecsvm_parser_parse_qualified_name(
                 parser,
                 &nodes->items[struct_index].name_start,
                 &nodes->items[struct_index].name_end,
                 error_message,
                 error_message_capacity
-            ) ||
-            !ecsvm_parser_parse_struct_body(
+            )) {
+            return 0;
+        }
+
+        if (ecsvm_parser_match(parser, ECSVM_TOKEN_SEMICOLON)) {
+            nodes->items[struct_index].token_end = parser->index - 1u;
+            return 1;
+        }
+
+        if (!ecsvm_parser_parse_struct_body(
                 parser,
                 nodes,
                 struct_index,
@@ -688,6 +806,7 @@ static int ecsvm_parser_parse_declaration(
             nodes,
             parent_index,
             0,
+            0,
             error_message,
             error_message_capacity
         );
@@ -698,6 +817,19 @@ static int ecsvm_parser_parse_declaration(
             parser,
             nodes,
             parent_index,
+            1,
+            0,
+            error_message,
+            error_message_capacity
+        );
+    }
+
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_ATTRIBUTE)) {
+        return ecsvm_parser_parse_struct_like(
+            parser,
+            nodes,
+            parent_index,
+            0,
             1,
             error_message,
             error_message_capacity

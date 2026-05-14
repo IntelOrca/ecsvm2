@@ -1,0 +1,25 @@
+namespace core {
+    [Alias("entity")]
+    struct Entity;
+
+    [Alias("i32")]
+    struct Int32;
+
+    [Alias("u32")]
+    struct UInt32;
+
+    [Alias("f32")]
+    struct Float32;
+
+    [Alias("void")]
+    struct Void;
+
+    [Alias("blob")]
+    struct Blob;
+
+    [Alias("string")]
+    struct String;
+
+    [Alias("bool")]
+    struct Bool;
+}

@@ -26,6 +26,9 @@ static ecsvm_token_kind_t ecsvm_keyword_kind(const char *text, size_t length)
     if (length == 9u && memcmp(text, "component", 9u) == 0) {
         return ECSVM_TOKEN_KEY_COMPONENT;
     }
+    if (length == 9u && memcmp(text, "attribute", 9u) == 0) {
+        return ECSVM_TOKEN_KEY_ATTRIBUTE;
+    }
     if (length == 6u && memcmp(text, "system", 6u) == 0) {
         return ECSVM_TOKEN_KEY_SYSTEM;
     }

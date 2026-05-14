@@ -232,8 +232,16 @@ int ecsvm_semantic_field_array_push(
     return 1;
 }
 
-int ecsvm_semantic_attribute_push(ecsvm_semantic_struct_t *semantic_struct, char *attribute)
+int ecsvm_semantic_attribute_push(
+    ecsvm_semantic_struct_t *semantic_struct,
+    char *attribute,
+    char *data
+)
 {
+    size_t previous_capacity;
+    char **attribute_data;
+
+    previous_capacity = semantic_struct->attribute_capacity;
     if (!ecsvm_reserve_bytes(
             (void **)&semantic_struct->attributes,
             sizeof(*semantic_struct->attributes),
@@ -243,7 +251,19 @@ int ecsvm_semantic_attribute_push(ecsvm_semantic_struct_t *semantic_struct, char
         return 0;
     }
 
+    if (semantic_struct->attribute_capacity != previous_capacity) {
+        attribute_data = (char **)realloc(
+            semantic_struct->attribute_data,
+            semantic_struct->attribute_capacity * sizeof(*semantic_struct->attribute_data)
+        );
+        if (attribute_data == NULL) {
+            return 0;
+        }
+        semantic_struct->attribute_data = attribute_data;
+    }
+
     semantic_struct->attributes[semantic_struct->attribute_count] = attribute;
+    semantic_struct->attribute_data[semantic_struct->attribute_count] = data;
     semantic_struct->attribute_count += 1u;
     return 1;
 }
@@ -280,9 +300,11 @@ void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct)
     }
     for (index = 0u; index < semantic_struct->attribute_count; ++index) {
         free(semantic_struct->attributes[index]);
+        free(semantic_struct->attribute_data[index]);
     }
     free(semantic_struct->fields);
     free(semantic_struct->attributes);
+    free(semantic_struct->attribute_data);
     memset(semantic_struct, 0, sizeof(*semantic_struct));
 }
 

@@ -22,8 +22,28 @@ ecsvm_status_t ecsvm_project_build(
     size_t error_message_capacity
 );
 
+ecsvm_status_t ecsvm_project_build_with_core(
+    const char *project_path,
+    const char *core_library_path,
+    char *out_ecsbin_path,
+    size_t out_ecsbin_path_capacity,
+    char *error_message,
+    size_t error_message_capacity
+);
+
 ecsvm_status_t ecsvm_project_build_ex(
     const char *project_path,
+    char *out_ecsbin_path,
+    size_t out_ecsbin_path_capacity,
+    char *error_message,
+    size_t error_message_capacity,
+    const ecsvm_logger_t *logger,
+    ecsvm_diagnostic_t *diagnostic
+);
+
+ecsvm_status_t ecsvm_project_build_with_core_ex(
+    const char *project_path,
+    const char *core_library_path,
     char *out_ecsbin_path,
     size_t out_ecsbin_path_capacity,
     char *error_message,

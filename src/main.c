@@ -99,7 +99,7 @@ static void print_usage(const char *argv0)
 {
     fprintf(
         stderr,
-        "usage: %s [--log-level error|warning|info|debug] --self-test | --pong | build <project> | run <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin>\n",
+        "usage: %s [--log-level error|warning|info|debug] --self-test | --pong | build [--core-lib <ecsbin>] <project> | run [--core-lib <ecsbin>] <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin>\n",
         argv0
     );
 }
@@ -343,11 +343,28 @@ int main(int argc, char **argv)
         return ecsvm_run_pong();
     }
 
-    if (argc - argi == 2 && strcmp(argv[argi], "build") == 0) {
+    if ((argc - argi == 2 || argc - argi == 4) && strcmp(argv[argi], "build") == 0) {
         ecsvm_status_t status;
+        const char *core_library_path;
+        const char *project_path;
 
-        status = ecsvm_project_build_ex(
-            argv[argi + 1],
+        core_library_path = NULL;
+        project_path = argv[argi + 1];
+        if (argc - argi == 4 &&
+            strcmp(argv[argi + 1], "--core-lib") == 0) {
+            core_library_path = argv[argi + 2];
+            project_path = argv[argi + 3];
+        }
+
+        if (argc - argi != 2 &&
+            !(argc - argi == 4 && strcmp(argv[argi + 1], "--core-lib") == 0)) {
+            print_usage(argv[0]);
+            return 1;
+        }
+
+        status = ecsvm_project_build_with_core_ex(
+            project_path,
+            core_library_path,
             output_path,
             sizeof(output_path),
             error_message,
@@ -364,14 +381,30 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (argc - argi == 2 && strcmp(argv[argi], "run") == 0) {
+    if ((argc - argi == 2 || argc - argi == 4) && strcmp(argv[argi], "run") == 0) {
         const char *binary_path;
+        const char *core_library_path;
+        const char *run_target;
 
-        if (ecsvm_path_is_directory(argv[argi + 1])) {
+        core_library_path = NULL;
+        run_target = argv[argi + 1];
+        if (argc - argi == 4 &&
+            strcmp(argv[argi + 1], "--core-lib") == 0) {
+            core_library_path = argv[argi + 2];
+            run_target = argv[argi + 3];
+        }
+        if (argc - argi != 2 &&
+            !(argc - argi == 4 && strcmp(argv[argi + 1], "--core-lib") == 0)) {
+            print_usage(argv[0]);
+            return 1;
+        }
+
+        if (ecsvm_path_is_directory(run_target)) {
             ecsvm_status_t status;
 
-            status = ecsvm_project_build_ex(
-                argv[argi + 1],
+            status = ecsvm_project_build_with_core_ex(
+                run_target,
+                core_library_path,
                 output_path,
                 sizeof(output_path),
                 error_message,
@@ -384,8 +417,8 @@ int main(int argc, char **argv)
                 return 1;
             }
             binary_path = output_path;
-        } else if (ecsvm_path_has_extension(argv[argi + 1], ".ecsbin")) {
-            binary_path = argv[argi + 1];
+        } else if (ecsvm_path_has_extension(run_target, ".ecsbin")) {
+            binary_path = run_target;
         } else {
             ecsvm_logger_log(&logger, ECSVM_LOG_LEVEL_ERROR, "run expects a project directory or .ecsbin file");
             return 1;

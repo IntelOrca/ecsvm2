@@ -119,6 +119,7 @@ static const char *ecsvm_ecsbin_token_text(ecsvm_ecsbin_token_kind_t kind)
         case ECSVM_ECSBIN_TOKEN_KEY_NAMESPACE: return "namespace";
         case ECSVM_ECSBIN_TOKEN_KEY_STRUCT: return "struct";
         case ECSVM_ECSBIN_TOKEN_KEY_COMPONENT: return "component";
+        case ECSVM_ECSBIN_TOKEN_KEY_ATTRIBUTE: return "attribute";
         case ECSVM_ECSBIN_TOKEN_KEY_SYSTEM: return "system";
         case ECSVM_ECSBIN_TOKEN_KEY_CONST: return "const";
         case ECSVM_ECSBIN_TOKEN_KEY_FN: return "fn";
@@ -849,6 +850,7 @@ static ecsvm_status_t ecsvm_append_decompiled_struct(
     const ecsvm_ecsbin_type_ref_t *type_ref;
     size_t attribute_index;
     size_t field_index;
+    int is_attribute;
     int is_component;
 
     definition = &module->struct_defs[struct_index];
@@ -859,6 +861,7 @@ static ecsvm_status_t ecsvm_append_decompiled_struct(
     }
 
     is_component = ecsvm_ecsbin_struct_is_component(module, definition);
+    is_attribute = 0;
     for (attribute_index = 0u; attribute_index < definition->attribute_count; ++attribute_index) {
         const ecsvm_ecsbin_attribute_t *attribute;
         const ecsvm_ecsbin_type_ref_t *attribute_type;
@@ -869,20 +872,52 @@ static ecsvm_status_t ecsvm_append_decompiled_struct(
             ecsvm_ecsbin_set_error(error_message, error_message_capacity, "struct attribute is invalid");
             return ECSVM_ERROR_ARGUMENT;
         }
+        if (strcmp(attribute_type->qualified_name, "core.Attribute") == 0) {
+            is_attribute = 1;
+        }
         if (is_component && strcmp(attribute_type->qualified_name, "core.Component") == 0) {
+            continue;
+        }
+        if (!is_component &&
+            is_attribute &&
+            strcmp(attribute_type->qualified_name, "core.Attribute") == 0) {
             continue;
         }
         if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||
             !ecsvm_ecsbin_text_buffer_append_char(buffer, '[') ||
-            !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(attribute_type, current_namespace)) ||
-            !ecsvm_ecsbin_text_buffer_append(buffer, "]\n")) {
+            !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(attribute_type, current_namespace))) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+            return ECSVM_ERROR_MEMORY;
+        }
+        if (attribute->data != NULL && attribute->data[0] != '\0' &&
+            (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
+             !ecsvm_ecsbin_text_buffer_append(buffer, attribute->data) ||
+             !ecsvm_ecsbin_text_buffer_append_char(buffer, ')'))) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+            return ECSVM_ERROR_MEMORY;
+        }
+        if (!ecsvm_ecsbin_text_buffer_append(buffer, "]\n")) {
             ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
             return ECSVM_ERROR_MEMORY;
         }
     }
 
+    if (definition->field_count == 0u) {
+        const char *kind_text;
+
+        kind_text = is_component ? "component " : (is_attribute ? "attribute " : "struct ");
+        if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||
+            !ecsvm_ecsbin_text_buffer_append(buffer, kind_text) ||
+            !ecsvm_ecsbin_text_buffer_append(buffer, type_ref->name) ||
+            !ecsvm_ecsbin_text_buffer_append(buffer, ";\n")) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+            return ECSVM_ERROR_MEMORY;
+        }
+        return ECSVM_OK;
+    }
+
     if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||
-        !ecsvm_ecsbin_text_buffer_append(buffer, is_component ? "component " : "struct ") ||
+        !ecsvm_ecsbin_text_buffer_append(buffer, is_component ? "component " : (is_attribute ? "attribute " : "struct ")) ||
         !ecsvm_ecsbin_text_buffer_append(buffer, type_ref->name) ||
         !ecsvm_ecsbin_text_buffer_append(buffer, " {\n")) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");

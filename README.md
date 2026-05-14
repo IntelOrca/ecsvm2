@@ -16,8 +16,8 @@ This repository currently contains:
 make
 ./build/ecsvm --self-test
 ./build/ecsvm --pong
-./build/ecsvm build examples/pong
-./build/ecsvm run examples/pong
+./build/ecsvm build --core-lib lib/core/out/core.ecsbin examples/pong
+./build/ecsvm run --core-lib lib/core/out/core.ecsbin examples/pong
 ./build/ecsvm decompile examples/pong/out/pong.ecsbin
 ./build/ecsvm inspect examples/pong/out/pong.ecsbin
 ```
@@ -37,6 +37,7 @@ When SDL3 is enabled, `--pong` and `run examples/pong` require SDL3 to be instal
 - `include/ecsvm/` - public C API
 - `src/` - runtime implementation and CLI entry point
 - `src/pong.c` - native pong demo using only the C runtime APIs
+- `lib/core/` - source for the build-time core library and its generated `out/core.ecsbin`
 - `Makefile` - Linux build entry point
 - `examples/basic/` - golden-path source project skeleton
 

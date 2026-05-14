@@ -56,6 +56,7 @@ typedef enum ecsvm_token_kind {
     ECSVM_TOKEN_KEY_NAMESPACE,
     ECSVM_TOKEN_KEY_STRUCT,
     ECSVM_TOKEN_KEY_COMPONENT,
+    ECSVM_TOKEN_KEY_ATTRIBUTE,
     ECSVM_TOKEN_KEY_SYSTEM,
     ECSVM_TOKEN_KEY_CONST,
     ECSVM_TOKEN_KEY_FN,
@@ -111,6 +112,7 @@ typedef struct ecsvm_syntax_node {
     size_t body_start;
     size_t body_end;
     int is_component;
+    int is_attribute;
     int has_body;
 } ecsvm_syntax_node_t;
 
@@ -152,11 +154,13 @@ typedef struct ecsvm_semantic_struct {
     size_t field_count;
     size_t field_capacity;
     char **attributes;
+    char **attribute_data;
     size_t attribute_count;
     size_t attribute_capacity;
     size_t size;
     size_t alignment;
     int is_component;
+    int is_attribute;
     int layout_state;
     int emit_state;
 } ecsvm_semantic_struct_t;
@@ -412,9 +416,9 @@ typedef struct ecsvm_blob_disk {
     uint64_t length;
 } ecsvm_blob_disk_t;
 
-enum {
-    ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT = 1u
-};
+#ifndef ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT
+#define ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT 1u
+#endif
 
 
 void ecsvm_set_error(char *error_message, size_t capacity, const char *message);
@@ -431,7 +435,7 @@ int ecsvm_source_file_array_push(ecsvm_source_file_array_t *array, ecsvm_source_
 void ecsvm_source_file_free(ecsvm_source_file_t *file);
 void ecsvm_source_file_array_free(ecsvm_source_file_array_t *array);
 int ecsvm_semantic_field_array_push(ecsvm_semantic_struct_t *semantic_struct, ecsvm_semantic_field_t field);
-int ecsvm_semantic_attribute_push(ecsvm_semantic_struct_t *semantic_struct, char *attribute);
+int ecsvm_semantic_attribute_push(ecsvm_semantic_struct_t *semantic_struct, char *attribute, char *data);
 int ecsvm_semantic_struct_array_push(ecsvm_semantic_struct_array_t *array, ecsvm_semantic_struct_t semantic_struct);
 void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct);
 void ecsvm_semantic_struct_array_free(ecsvm_semantic_struct_array_t *array);

@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ecsvm/ecsbin.h"
+
 #define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
 
 #include "project_internal.h"
@@ -387,8 +389,289 @@ static int ecsvm_ensure_directory(const char *path)
     return 0;
 }
 
-ecsvm_status_t ecsvm_project_build_ex(
+static int ecsvm_project_find_semantic_struct(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *qualified_name
+)
+{
+    size_t index;
+
+    for (index = 0u; index < semantic_structs->count; ++index) {
+        if (strcmp(semantic_structs->items[index].qualified_name, qualified_name) == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int ecsvm_project_find_semantic_function(
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *qualified_name
+)
+{
+    size_t index;
+
+    for (index = 0u; index < semantic_functions->count; ++index) {
+        if (strcmp(semantic_functions->items[index].qualified_name, qualified_name) == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int ecsvm_import_struct_attributes(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_struct_def_t *definition,
+    ecsvm_semantic_struct_t *semantic_struct,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    size_t attribute_index;
+
+    for (attribute_index = 0u; attribute_index < definition->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+        char *attribute_name;
+        char *attribute_data;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, definition->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref == NULL) {
+            ecsvm_set_error(error_message, error_message_capacity, "core library attribute is invalid");
+            return 0;
+        }
+
+        attribute_name = ecsvm_copy_string(type_ref->qualified_name);
+        attribute_data = attribute->data != NULL && attribute->data[0] != '\0'
+            ? ecsvm_copy_string(attribute->data)
+            : NULL;
+        if (attribute_name == NULL ||
+            !ecsvm_semantic_attribute_push(semantic_struct, attribute_name, attribute_data)) {
+            free(attribute_name);
+            free(attribute_data);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library attributes");
+            return 0;
+        }
+
+        if (strcmp(attribute_name, "core.Component") == 0) {
+            semantic_struct->is_component = 1;
+        } else if (strcmp(attribute_name, "core.Attribute") == 0) {
+            semantic_struct->is_attribute = 1;
+        }
+    }
+
+    return 1;
+}
+
+static int ecsvm_import_core_library(
+    const char *core_library_path,
+    ecsvm_semantic_struct_array_t *semantic_structs,
+    ecsvm_semantic_function_array_t *semantic_functions,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    ecsvm_ecsbin_module_t module;
+    ecsvm_status_t status;
+    size_t index;
+
+    if (core_library_path == NULL || core_library_path[0] == '\0') {
+        return 1;
+    }
+
+    memset(&module, 0, sizeof(module));
+    status = ecsvm_ecsbin_load_ex(
+        core_library_path,
+        &module,
+        error_message,
+        error_message_capacity,
+        diagnostic
+    );
+    if (status != ECSVM_OK) {
+        return 0;
+    }
+
+    for (index = 0u; index < module.struct_def_count; ++index) {
+        const ecsvm_ecsbin_struct_def_t *definition;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+        ecsvm_semantic_struct_t semantic_struct;
+        size_t field_index;
+
+        definition = &module.struct_defs[index];
+        type_ref = ecsvm_ecsbin_type_ref(&module, definition->type_id);
+        if (type_ref == NULL || type_ref->qualified_name == NULL) {
+            ecsvm_set_error(error_message, error_message_capacity, "core library type is invalid");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+
+        if (ecsvm_project_find_semantic_struct(semantic_structs, type_ref->qualified_name) >= 0) {
+            continue;
+        }
+
+        memset(&semantic_struct, 0, sizeof(semantic_struct));
+        semantic_struct.namespace_name = ecsvm_copy_string(type_ref->namespace_name);
+        semantic_struct.name = ecsvm_copy_string(type_ref->name);
+        semantic_struct.qualified_name = ecsvm_copy_string(type_ref->qualified_name);
+        semantic_struct.is_component = ecsvm_ecsbin_struct_is_component(&module, definition);
+        semantic_struct.size = definition->size;
+        semantic_struct.alignment = definition->alignment;
+        semantic_struct.layout_state = definition->size == 0u ? 0 : 2;
+        semantic_struct.emit_state = 0;
+        if (semantic_struct.namespace_name == NULL ||
+            semantic_struct.name == NULL ||
+            semantic_struct.qualified_name == NULL) {
+            ecsvm_semantic_struct_free(&semantic_struct);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library types");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+
+        if (!ecsvm_import_struct_attributes(
+                &module,
+                definition,
+                &semantic_struct,
+                error_message,
+                error_message_capacity
+            )) {
+            ecsvm_semantic_struct_free(&semantic_struct);
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+
+        for (field_index = 0u; field_index < definition->field_count; ++field_index) {
+            const ecsvm_ecsbin_field_ref_t *field_ref;
+            const ecsvm_ecsbin_type_ref_t *field_type;
+            ecsvm_semantic_field_t field;
+
+            field_ref = definition->field_start == 0u
+                ? NULL
+                : &module.field_refs[definition->field_start - 1u + field_index];
+            field_type = field_ref != NULL ? ecsvm_ecsbin_type_ref(&module, field_ref->type_id) : NULL;
+            if (field_ref == NULL || field_type == NULL) {
+                ecsvm_semantic_struct_free(&semantic_struct);
+                ecsvm_set_error(error_message, error_message_capacity, "core library field is invalid");
+                ecsvm_ecsbin_unload(&module);
+                return 0;
+            }
+
+            memset(&field, 0, sizeof(field));
+            field.name = ecsvm_copy_string(field_ref->name);
+            field.type_name = ecsvm_copy_string(field_type->qualified_name);
+            if (field.name == NULL || field.type_name == NULL ||
+                !ecsvm_semantic_field_array_push(&semantic_struct, field)) {
+                free(field.name);
+                free(field.type_name);
+                ecsvm_semantic_struct_free(&semantic_struct);
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library fields");
+                ecsvm_ecsbin_unload(&module);
+                return 0;
+            }
+        }
+
+        if (!ecsvm_semantic_struct_array_push(semantic_structs, semantic_struct)) {
+            ecsvm_semantic_struct_free(&semantic_struct);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library structs");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+    }
+
+    for (index = 0u; index < module.function_ref_count; ++index) {
+        const ecsvm_ecsbin_function_ref_t *function_ref;
+        const ecsvm_ecsbin_type_ref_t *return_type;
+        ecsvm_semantic_function_t semantic_function;
+        size_t parameter_index;
+
+        function_ref = &module.function_refs[index];
+        if (ecsvm_project_find_semantic_function(semantic_functions, function_ref->qualified_name) >= 0) {
+            continue;
+        }
+
+        return_type = ecsvm_ecsbin_function_return_type(&module, function_ref);
+        if (return_type == NULL) {
+            ecsvm_set_error(error_message, error_message_capacity, "core library function return type is invalid");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+
+        memset(&semantic_function, 0, sizeof(semantic_function));
+        semantic_function.namespace_name = ecsvm_copy_string(function_ref->namespace_name);
+        semantic_function.name = ecsvm_copy_string(function_ref->name);
+        semantic_function.qualified_name = ecsvm_copy_string(function_ref->qualified_name);
+        semantic_function.return_type_name = ecsvm_copy_string(return_type->qualified_name);
+        if (semantic_function.namespace_name == NULL ||
+            semantic_function.name == NULL ||
+            semantic_function.qualified_name == NULL ||
+            semantic_function.return_type_name == NULL) {
+            ecsvm_semantic_function_free(&semantic_function);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library functions");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+
+        for (parameter_index = 0u; parameter_index < function_ref->parameter_count; ++parameter_index) {
+            const ecsvm_ecsbin_parameter_t *parameter_ref;
+            const ecsvm_ecsbin_type_ref_t *parameter_type;
+            const ecsvm_ecsbin_blob_t *default_value_blob;
+            ecsvm_semantic_parameter_t parameter;
+
+            parameter_ref = ecsvm_ecsbin_parameter_ref(
+                &module,
+                function_ref->parameter_start + (uint32_t)parameter_index
+            );
+            parameter_type = parameter_ref != NULL ? ecsvm_ecsbin_type_ref(&module, parameter_ref->type_id) : NULL;
+            if (parameter_ref == NULL || parameter_type == NULL) {
+                ecsvm_semantic_function_free(&semantic_function);
+                ecsvm_set_error(error_message, error_message_capacity, "core library parameter is invalid");
+                ecsvm_ecsbin_unload(&module);
+                return 0;
+            }
+
+            memset(&parameter, 0, sizeof(parameter));
+            default_value_blob = parameter_ref->default_value_blob_id == 0u
+                ? NULL
+                : ecsvm_ecsbin_blob_ref(&module, parameter_ref->default_value_blob_id);
+            parameter.name = ecsvm_copy_string(parameter_ref->name);
+            parameter.type_name = ecsvm_copy_string(parameter_type->qualified_name);
+            parameter.default_value = default_value_blob == NULL
+                ? NULL
+                : (default_value_blob->data != NULL
+                    ? ecsvm_copy_string_range(
+                        (const char *)default_value_blob->data,
+                        (size_t)default_value_blob->length
+                    )
+                    : ecsvm_copy_string(""));
+            if (parameter.name == NULL ||
+                parameter.type_name == NULL ||
+                !ecsvm_semantic_function_parameter_push(&semantic_function, parameter)) {
+                ecsvm_semantic_parameter_free(&parameter);
+                ecsvm_semantic_function_free(&semantic_function);
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library parameters");
+                ecsvm_ecsbin_unload(&module);
+                return 0;
+            }
+        }
+
+        if (!ecsvm_semantic_function_array_push(semantic_functions, semantic_function)) {
+            ecsvm_semantic_function_free(&semantic_function);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library functions");
+            ecsvm_ecsbin_unload(&module);
+            return 0;
+        }
+    }
+
+    ecsvm_ecsbin_unload(&module);
+    return 1;
+}
+
+static ecsvm_status_t ecsvm_project_build_internal(
     const char *project_path,
+    const char *core_library_path,
     char *out_ecsbin_path,
     size_t out_ecsbin_path_capacity,
     char *error_message,
@@ -498,6 +781,14 @@ ecsvm_status_t ecsvm_project_build_ex(
     ecsvm_string_array_free(&source_paths);
 
     if (!ecsvm_collect_semantics(&files, &semantic_structs, &semantic_functions, error_message, error_message_capacity, diagnostic) ||
+        !ecsvm_import_core_library(
+            core_library_path,
+            &semantic_structs,
+            &semantic_functions,
+            error_message,
+            error_message_capacity,
+            diagnostic
+        ) ||
         !ecsvm_resolve_semantic_types(&semantic_structs, &semantic_functions, error_message, error_message_capacity, diagnostic) ||
         !ecsvm_compute_layouts(&semantic_structs, error_message, error_message_capacity, diagnostic)) {
         result = ECSVM_ERROR_ARGUMENT;
@@ -571,6 +862,72 @@ cleanup:
     return result;
 }
 
+ecsvm_status_t ecsvm_project_build_with_core_ex(
+    const char *project_path,
+    const char *core_library_path,
+    char *out_ecsbin_path,
+    size_t out_ecsbin_path_capacity,
+    char *error_message,
+    size_t error_message_capacity,
+    const ecsvm_logger_t *logger,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    return ecsvm_project_build_internal(
+        project_path,
+        core_library_path,
+        out_ecsbin_path,
+        out_ecsbin_path_capacity,
+        error_message,
+        error_message_capacity,
+        logger,
+        diagnostic
+    );
+}
+
+ecsvm_status_t ecsvm_project_build_ex(
+    const char *project_path,
+    char *out_ecsbin_path,
+    size_t out_ecsbin_path_capacity,
+    char *error_message,
+    size_t error_message_capacity,
+    const ecsvm_logger_t *logger,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    return ecsvm_project_build_internal(
+        project_path,
+        NULL,
+        out_ecsbin_path,
+        out_ecsbin_path_capacity,
+        error_message,
+        error_message_capacity,
+        logger,
+        diagnostic
+    );
+}
+
+ecsvm_status_t ecsvm_project_build_with_core(
+    const char *project_path,
+    const char *core_library_path,
+    char *out_ecsbin_path,
+    size_t out_ecsbin_path_capacity,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    return ecsvm_project_build_with_core_ex(
+        project_path,
+        core_library_path,
+        out_ecsbin_path,
+        out_ecsbin_path_capacity,
+        error_message,
+        error_message_capacity,
+        NULL,
+        NULL
+    );
+}
+
 
 ecsvm_status_t ecsvm_project_build(
     const char *project_path,
@@ -580,8 +937,9 @@ ecsvm_status_t ecsvm_project_build(
     size_t error_message_capacity
 )
 {
-    return ecsvm_project_build_ex(
+    return ecsvm_project_build_internal(
         project_path,
+        NULL,
         out_ecsbin_path,
         out_ecsbin_path_capacity,
         error_message,

@@ -11,9 +11,9 @@
 extern "C" {
 #endif
 
-enum {
-    ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT = 1u
-};
+#ifndef ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT
+#define ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT 1u
+#endif
 
 typedef struct ecsvm_ecsbin_type_ref {
     char *namespace_name;

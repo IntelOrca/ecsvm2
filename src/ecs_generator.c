@@ -245,44 +245,80 @@ static char *ecsvm_join_qualified_name(const char *namespace_name, const char *n
     }
 }
 
-static int ecsvm_is_builtin_alias(const char *name)
+static char *ecsvm_attribute_string_value(const char *text)
 {
-    return strcmp(name, "entity") == 0 ||
-        strcmp(name, "i32") == 0 ||
-        strcmp(name, "u32") == 0 ||
-        strcmp(name, "f32") == 0 ||
-        strcmp(name, "void") == 0 ||
-        strcmp(name, "blob") == 0 ||
-        strcmp(name, "string") == 0 ||
-        strcmp(name, "bool") == 0;
+    size_t length;
+
+    if (text == NULL) {
+        return NULL;
+    }
+
+    length = strlen(text);
+    if (length >= 2u && text[0] == '"' && text[length - 1u] == '"') {
+        return ecsvm_copy_string_range(text + 1, length - 2u);
+    }
+
+    return ecsvm_copy_string(text);
 }
 
-static char *ecsvm_builtin_type_name(const char *alias)
+static char *ecsvm_find_type_alias_target(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *name
+)
 {
-    if (strcmp(alias, "entity") == 0) {
-        return ecsvm_copy_string("core.Entity");
+    const char *qualified_alias_prefix;
+    const char *alias_name;
+    size_t alias_prefix_length;
+    size_t index;
+
+    qualified_alias_prefix = NULL;
+    alias_name = name;
+    alias_prefix_length = 0u;
+    if (name != NULL) {
+        const char *dot;
+
+        dot = strrchr(name, '.');
+        if (dot != NULL) {
+            qualified_alias_prefix = name;
+            alias_name = dot + 1;
+            alias_prefix_length = (size_t)(dot - name);
+        }
     }
-    if (strcmp(alias, "i32") == 0) {
-        return ecsvm_copy_string("core.Int32");
+
+    for (index = 0u; index < semantic_structs->count; ++index) {
+        const ecsvm_semantic_struct_t *semantic_struct;
+        size_t attribute_index;
+
+        semantic_struct = &semantic_structs->items[index];
+        for (attribute_index = 0u; attribute_index < semantic_struct->attribute_count; ++attribute_index) {
+            char *alias_value;
+            int matches_prefix;
+
+            if (strcmp(semantic_struct->attributes[attribute_index], "core.Alias") != 0 &&
+                strcmp(semantic_struct->attributes[attribute_index], "Alias") != 0) {
+                continue;
+            }
+
+            alias_value = ecsvm_attribute_string_value(semantic_struct->attribute_data[attribute_index]);
+            if (alias_value == NULL) {
+                continue;
+            }
+
+            matches_prefix = qualified_alias_prefix == NULL ||
+                (strncmp(
+                     semantic_struct->qualified_name,
+                     qualified_alias_prefix,
+                     alias_prefix_length
+                 ) == 0 &&
+                 semantic_struct->qualified_name[alias_prefix_length] == '.');
+            if (matches_prefix && strcmp(alias_value, alias_name) == 0) {
+                free(alias_value);
+                return ecsvm_copy_string(semantic_struct->qualified_name);
+            }
+            free(alias_value);
+        }
     }
-    if (strcmp(alias, "u32") == 0) {
-        return ecsvm_copy_string("core.UInt32");
-    }
-    if (strcmp(alias, "f32") == 0) {
-        return ecsvm_copy_string("core.Float32");
-    }
-    if (strcmp(alias, "void") == 0) {
-        return ecsvm_copy_string("core.Void");
-    }
-    if (strcmp(alias, "blob") == 0) {
-        return ecsvm_copy_string("core.Blob");
-    }
-    if (strcmp(alias, "string") == 0) {
-        return ecsvm_copy_string("core.String");
-    }
-    if (strcmp(alias, "bool") == 0) {
-        return ecsvm_copy_string("core.Bool");
-    }
+
     return NULL;
 }
 
@@ -401,8 +437,9 @@ static char *ecsvm_resolve_type_name(
     char *qualified_name;
     int index;
 
-    if (ecsvm_is_builtin_alias(name)) {
-        return ecsvm_builtin_type_name(name);
+    qualified_name = ecsvm_find_type_alias_target(semantic_structs, name);
+    if (qualified_name != NULL) {
+        return qualified_name;
     }
 
     index = ecsvm_find_semantic_struct(semantic_structs, name);
@@ -522,10 +559,15 @@ static int ecsvm_collect_semantic_from_node(
 
     node = &nodes->items[node_index];
     if (node->kind == ECSVM_SYNTAX_NAMESPACE) {
+        char *namespace_name_part;
         char *child_namespace;
         size_t child_index;
 
-        child_namespace = ecsvm_tokens_to_name(file, node->name_start, node->name_end);
+        namespace_name_part = ecsvm_tokens_to_name(file, node->name_start, node->name_end);
+        child_namespace = namespace_name_part != NULL
+            ? ecsvm_join_qualified_name(namespace_name, namespace_name_part)
+            : NULL;
+        free(namespace_name_part);
         if (child_namespace == NULL) {
             ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting namespaces");
             return 0;
@@ -583,16 +625,23 @@ static int ecsvm_collect_semantic_from_node(
             child = &nodes->items[child_index];
             if (child->kind == ECSVM_SYNTAX_ATTRIBUTE) {
                 char *attribute_name;
+                char *attribute_data;
 
-                if (child->name_start == 0u && child->name_end == 0u) {
+                if (child->name_start == 0u && child->name_end == 0u && child->is_component) {
                     attribute_name = ecsvm_copy_string("core.Component");
+                } else if (child->name_start == 0u && child->name_end == 0u && child->is_attribute) {
+                    attribute_name = ecsvm_copy_string("core.Attribute");
                 } else {
                     attribute_name = ecsvm_tokens_to_name(file, child->name_start, child->name_end);
                 }
+                attribute_data = (child->value_start != 0u || child->value_end != 0u)
+                    ? ecsvm_tokens_to_source(file, child->value_start, child->value_end)
+                    : NULL;
 
                 if (attribute_name == NULL ||
-                    !ecsvm_semantic_attribute_push(&semantic_struct, attribute_name)) {
+                    !ecsvm_semantic_attribute_push(&semantic_struct, attribute_name, attribute_data)) {
                     free(attribute_name);
+                    free(attribute_data);
                     ecsvm_semantic_struct_free(&semantic_struct);
                     ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting attributes");
                     return 0;
@@ -600,6 +649,8 @@ static int ecsvm_collect_semantic_from_node(
 
                 if (strcmp(attribute_name, "core.Component") == 0) {
                     semantic_struct.is_component = 1;
+                } else if (strcmp(attribute_name, "core.Attribute") == 0) {
+                    semantic_struct.is_attribute = 1;
                 }
             } else if (child->kind == ECSVM_SYNTAX_FIELD) {
                 ecsvm_semantic_field_t field;
@@ -903,6 +954,19 @@ static int ecsvm_compute_struct_layout(
         offset += field_size;
         if (field_alignment > alignment) {
             alignment = field_alignment;
+        }
+    }
+
+    if (semantic_struct->field_count == 0u) {
+        size_t builtin_size;
+        size_t builtin_alignment;
+
+        builtin_size = ecsvm_builtin_layout(semantic_struct->qualified_name, &builtin_alignment);
+        if (builtin_size != 0u) {
+            semantic_struct->alignment = builtin_alignment;
+            semantic_struct->size = builtin_size;
+            semantic_struct->layout_state = 2;
+            return 1;
         }
     }
 
@@ -1402,6 +1466,8 @@ static int ecsvm_serialize_function_ast_blob(
     return 1;
 }
 
+static const char *ecsvm_c_type_name(const char *qualified_name);
+
 int ecsvm_build_ecsbin_tables(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const ecsvm_semantic_function_array_t *semantic_functions,
@@ -1449,8 +1515,15 @@ int ecsvm_build_ecsbin_tables(
                 blobs,
                 semantic_struct->attributes[attribute_index]
             );
-            attribute.data_blob_id = empty_blob_id;
+            attribute.data_blob_id = semantic_struct->attribute_data[attribute_index] == NULL
+                ? empty_blob_id
+                : ecsvm_ensure_blob(
+                    blobs,
+                    semantic_struct->attribute_data[attribute_index],
+                    strlen(semantic_struct->attribute_data[attribute_index])
+                );
             if (attribute.type_id == 0u ||
+                attribute.data_blob_id == 0u ||
                 !ecsvm_attribute_builder_array_push(attributes, attribute)) {
                 return 0;
             }
@@ -1852,6 +1925,21 @@ static int ecsvm_write_types_for_struct(
     size_t field_index;
 
     semantic_struct = &semantic_structs->items[struct_index];
+    if (semantic_struct->field_count == 0u) {
+        const char *builtin_type;
+
+        builtin_type = ecsvm_c_type_name(semantic_struct->qualified_name);
+        if (builtin_type != NULL) {
+            if (fprintf(file, "typedef %s ", builtin_type) < 0 ||
+                !ecsvm_write_c_identifier(file, semantic_struct->qualified_name) ||
+                fprintf(file, "_t;\n\n") < 0) {
+                return 0;
+            }
+            semantic_struct->emit_state = 2;
+            return 1;
+        }
+    }
+
     if (semantic_struct->emit_state == 2) {
         return 1;
     }

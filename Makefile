@@ -6,12 +6,20 @@ TARGET := $(BUILD_DIR)/ecsvm
 ECSVM_ENABLE_SDL3 ?= 1
 
 COMMON_SRCS := \
+	src/bin.c \
+	src/bin_decompile.c \
+	src/bin_inspect.c \
 	src/component.c \
-	src/ecsbin.c \
+	src/diagnostic.c \
+	src/ecs_generator.c \
+	src/ecs_lexer.c \
+	src/ecs_parser.c \
 	src/ecsvm.c \
+	src/logger.c \
 	src/main.c \
 	src/pong.c \
-	src/project.c
+	src/project.c \
+	src/project_common.c
 
 COMMON_OBJS := $(COMMON_SRCS:src/%.c=$(OBJ_DIR)/%.o)
 

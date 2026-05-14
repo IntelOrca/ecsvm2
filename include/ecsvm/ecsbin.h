@@ -1,6 +1,7 @@
 #ifndef ECSVM_ECSBIN_H
 #define ECSVM_ECSBIN_H
 
+#include "ecsvm/diagnostic.h"
 #include "ecsvm/ecsvm.h"
 
 #include <stddef.h>
@@ -98,6 +99,14 @@ ecsvm_status_t ecsvm_ecsbin_load(
     size_t error_message_capacity
 );
 
+ecsvm_status_t ecsvm_ecsbin_load_ex(
+    const char *path,
+    ecsvm_ecsbin_module_t *out_module,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+);
+
 void ecsvm_ecsbin_unload(ecsvm_ecsbin_module_t *module);
 
 const ecsvm_ecsbin_type_ref_t *ecsvm_ecsbin_type_ref(
@@ -131,6 +140,22 @@ ecsvm_status_t ecsvm_ecsbin_decompile_function_body(
     char **out_source,
     char *error_message,
     size_t error_message_capacity
+);
+
+ecsvm_status_t ecsvm_ecsbin_decompile_module(
+    const ecsvm_ecsbin_module_t *module,
+    char **out_source,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+);
+
+ecsvm_status_t ecsvm_ecsbin_inspect_module(
+    const ecsvm_ecsbin_module_t *module,
+    char **out_text,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
 );
 
 const ecsvm_ecsbin_struct_def_t *ecsvm_ecsbin_find_struct(

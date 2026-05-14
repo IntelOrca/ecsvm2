@@ -169,13 +169,20 @@ static int ecsvm_parser_skip_until_semicolon(
 
 static int ecsvm_parser_parse_import(
     ecsvm_parser_t *parser,
+    ecsvm_syntax_node_array_t *nodes,
+    size_t parent_index,
     char *error_message,
     size_t error_message_capacity
 )
 {
+    ecsvm_syntax_node_t import_node;
+    size_t import_index;
     size_t start;
     size_t end;
 
+    memset(&import_node, 0, sizeof(import_node));
+    import_node.kind = ECSVM_SYNTAX_IMPORT;
+    import_node.token_start = parser->index - 1u;
     if (!ecsvm_parser_parse_qualified_name(
             parser,
             &start,
@@ -186,7 +193,20 @@ static int ecsvm_parser_parse_import(
         return 0;
     }
 
-    return ecsvm_parser_expect(parser, ECSVM_TOKEN_SEMICOLON, error_message, error_message_capacity);
+    import_node.name_start = start;
+    import_node.name_end = end;
+    if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_SEMICOLON, error_message, error_message_capacity)) {
+        return 0;
+    }
+
+    import_node.token_end = parser->index - 1u;
+    if (!ecsvm_syntax_node_array_push(nodes, import_node, &import_index)) {
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while building syntax tree");
+        return 0;
+    }
+
+    ecsvm_syntax_node_add_child(nodes, parent_index, import_index);
+    return 1;
 }
 
 static int ecsvm_parser_parse_struct_body(
@@ -698,7 +718,13 @@ static int ecsvm_parser_parse_declaration(
     ecsvm_syntax_node_t struct_node;
 
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_IMPORT)) {
-        return ecsvm_parser_parse_import(parser, error_message, error_message_capacity);
+        return ecsvm_parser_parse_import(
+            parser,
+            nodes,
+            parent_index,
+            error_message,
+            error_message_capacity
+        );
     }
 
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_NAMESPACE)) {

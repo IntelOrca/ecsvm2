@@ -13,6 +13,7 @@ COMMON_SRCS := \
 	src/bin_inspect.c \
 	src/component.c \
 	src/diagnostic.c \
+	src/ecs_tree.c \
 	src/ecs_generator.c \
 	src/ecs_lexer.c \
 	src/ecs_parser.c \
@@ -21,7 +22,9 @@ COMMON_SRCS := \
 	src/main.c \
 	src/pong.c \
 	src/project.c \
-	src/project_common.c
+	src/project_common.c \
+	src/stream.c \
+	src/xml.c
 
 COMMON_OBJS := $(COMMON_SRCS:src/%.c=$(OBJ_DIR)/%.o)
 

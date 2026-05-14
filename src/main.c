@@ -94,14 +94,148 @@ static ecsvm_status_t demo_integrate(ecsvm_context_t *ctx)
 
 #include "ecsvm/diagnostic.h"
 #include "ecsvm/logger.h"
+#include "ecs_tree.h"
+#include "project_internal.h"
+#include "stream.h"
+#include "xml.h"
+
+#ifdef _WIN32
+#include <direct.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#else
+#include <limits.h>
+#include <unistd.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#endif
 
 static void print_usage(const char *argv0)
 {
     fprintf(
         stderr,
-        "usage: %s [--log-level error|warning|info|debug] --self-test | --pong | build [--core-lib <ecsbin>] <project> | run [--core-lib <ecsbin>] <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin>\n",
+        "usage: %s [--log-level error|warning|info|debug] --self-test | --pong | build [--core-lib <ecsbin>] <project> | run [--core-lib <ecsbin>] <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin> | parse <file.ecs>\n",
         argv0
     );
+}
+
+static int ecsvm_cli_path_is_absolute(const char *path)
+{
+    if (path == NULL || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    return (path[0] >= 'A' && path[0] <= 'Z' && path[1] == ':') ||
+        (path[0] >= 'a' && path[0] <= 'z' && path[1] == ':') ||
+        path[0] == '\\' ||
+        path[0] == '/';
+#else
+    return path[0] == '/';
+#endif
+}
+
+static char *ecsvm_cli_make_absolute_path(const char *path)
+{
+    char cwd[PATH_MAX];
+    size_t length;
+    char *result;
+
+    if (path == NULL) {
+        return NULL;
+    }
+
+    if (ecsvm_cli_path_is_absolute(path)) {
+        return ecsvm_copy_string(path);
+    }
+
+#ifdef _WIN32
+    if (_getcwd(cwd, (int)sizeof(cwd)) == NULL) {
+#else
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+#endif
+        return ecsvm_copy_string(path);
+    }
+
+    length = strlen(cwd) + 1u + strlen(path) + 1u;
+    result = (char *)malloc(length);
+    if (result == NULL) {
+        return NULL;
+    }
+
+    (void)snprintf(result, length, "%s/%s", cwd, path);
+    return result;
+}
+
+static int ecsvm_cli_read_source_file(
+    const char *path,
+    ecsvm_source_file_t *file,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    FILE *stream;
+    long length;
+
+    memset(file, 0, sizeof(*file));
+    file->path = ecsvm_cli_make_absolute_path(path);
+    if (file->path == NULL) {
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while preparing source path");
+        ecsvm_diagnostic_set(diagnostic, path, 0u, 0u, ECSVM_DIAGNOSTIC_OUT_OF_MEMORY, error_message);
+        return 0;
+    }
+
+    stream = fopen(path, "rb");
+    if (stream == NULL) {
+        ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
+        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
+        return 0;
+    }
+
+    if (fseek(stream, 0, SEEK_END) != 0) {
+        fclose(stream);
+        ecsvm_set_error(error_message, error_message_capacity, "failed to seek source file");
+        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to seek source file");
+        return 0;
+    }
+
+    length = ftell(stream);
+    if (length < 0 || fseek(stream, 0, SEEK_SET) != 0) {
+        fclose(stream);
+        ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
+        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
+        return 0;
+    }
+
+    file->source = (char *)malloc((size_t)length + 1u);
+    if (file->source == NULL) {
+        fclose(stream);
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while reading source file");
+        ecsvm_diagnostic_set(
+            diagnostic,
+            file->path,
+            0u,
+            0u,
+            ECSVM_DIAGNOSTIC_OUT_OF_MEMORY,
+            "out of memory while reading source file"
+        );
+        return 0;
+    }
+
+    if (length > 0 && fread(file->source, 1u, (size_t)length, stream) != (size_t)length) {
+        fclose(stream);
+        ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
+        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
+        return 0;
+    }
+
+    fclose(stream);
+    file->source[length] = '\0';
+    file->length = (size_t)length;
+    return 1;
 }
 
 static void log_failure(
@@ -475,6 +609,43 @@ int main(int argc, char **argv)
         free(text);
         ecsvm_ecsbin_unload(&module);
         return 0;
+    }
+
+    if (argc - argi == 2 && strcmp(argv[argi], "parse") == 0) {
+        ecsvm_ecs_tree_t tree;
+        ecsvm_file_stream_t stdout_stream;
+        ecsvm_source_file_t file;
+        ecsvm_xml_writer_t writer;
+        int ok;
+        int wrote_xml;
+
+        memset(&file, 0, sizeof(file));
+        ok = ecsvm_cli_read_source_file(
+            argv[argi + 1],
+            &file,
+            error_message,
+            sizeof(error_message),
+            &diagnostic
+        );
+        if (ok) {
+            ok = ecsvm_lex_source(&file, error_message, sizeof(error_message), &diagnostic) &&
+                ecsvm_parse_file(&file, error_message, sizeof(error_message), &diagnostic);
+        }
+
+        ecsvm_ecs_tree_init(&tree, &file, &diagnostic);
+        ecsvm_file_stream_init(&stdout_stream, stdout);
+        ecsvm_xml_writer_init(&writer, &stdout_stream.stream);
+        wrote_xml = ecsvm_xml_writer_write_declaration(&writer) &&
+            ecsvm_ecs_tree_write_xml(&tree, &writer);
+        ecsvm_xml_writer_free(&writer);
+        if (!wrote_xml) {
+            ecsvm_source_file_free(&file);
+            ecsvm_logger_log(&logger, ECSVM_LOG_LEVEL_ERROR, "failed to write parse output");
+            return 1;
+        }
+
+        ecsvm_source_file_free(&file);
+        return ok ? 0 : 1;
     }
 
     print_usage(argv[0]);

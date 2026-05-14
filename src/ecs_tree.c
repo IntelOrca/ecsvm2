@@ -19,8 +19,46 @@ static const char *ecsvm_ecs_tree_syntax_kind_string(ecsvm_syntax_kind_t kind)
         return "attribute";
     case ECSVM_SYNTAX_FUNCTION:
         return "function";
+    case ECSVM_SYNTAX_SYSTEM:
+        return "system";
+    case ECSVM_SYNTAX_PARAMETER_LIST:
+        return "parameter_list";
     case ECSVM_SYNTAX_PARAMETER:
         return "parameter";
+    case ECSVM_SYNTAX_TYPE_EXPRESSION:
+        return "type_expression";
+    case ECSVM_SYNTAX_IDENTIFIER:
+        return "identifier";
+    case ECSVM_SYNTAX_BLOCK:
+        return "block";
+    case ECSVM_SYNTAX_DECLARATION:
+        return "declaration";
+    case ECSVM_SYNTAX_RETURN_STATEMENT:
+        return "return_statement";
+    case ECSVM_SYNTAX_IF_STATEMENT:
+        return "if_statement";
+    case ECSVM_SYNTAX_ELSE_CLAUSE:
+        return "else_clause";
+    case ECSVM_SYNTAX_EXPRESSION_STATEMENT:
+        return "expression_statement";
+    case ECSVM_SYNTAX_ASSIGNMENT_EXPRESSION:
+        return "assignment_expression";
+    case ECSVM_SYNTAX_BINARY_EXPRESSION:
+        return "binary_expression";
+    case ECSVM_SYNTAX_UNARY_EXPRESSION:
+        return "unary_expression";
+    case ECSVM_SYNTAX_CALL_EXPRESSION:
+        return "call_expression";
+    case ECSVM_SYNTAX_ARGUMENT_LIST:
+        return "argument_list";
+    case ECSVM_SYNTAX_MEMBER_EXPRESSION:
+        return "member_expression";
+    case ECSVM_SYNTAX_INDEX_EXPRESSION:
+        return "index_expression";
+    case ECSVM_SYNTAX_GROUPING_EXPRESSION:
+        return "grouping_expression";
+    case ECSVM_SYNTAX_LITERAL_EXPRESSION:
+        return "literal_expression";
     }
 
     return "unknown";

@@ -711,21 +711,33 @@ static int ecsvm_collect_semantic_from_node(
             const ecsvm_syntax_node_t *child;
 
             child = &nodes->items[child_index];
-            if (child->kind == ECSVM_SYNTAX_PARAMETER) {
-                ecsvm_semantic_parameter_t parameter;
+            if (child->kind == ECSVM_SYNTAX_PARAMETER_LIST) {
+                size_t parameter_index;
 
-                memset(&parameter, 0, sizeof(parameter));
-                parameter.name = ecsvm_tokens_to_name(file, child->name_start, child->name_end);
-                parameter.type_name = ecsvm_tokens_to_name(file, child->type_start, child->type_end);
-                parameter.default_value = (child->value_start != 0u || child->value_end != 0u)
-                    ? ecsvm_tokens_to_source(file, child->value_start, child->value_end)
-                    : NULL;
-                if (parameter.name == NULL || parameter.type_name == NULL ||
-                    !ecsvm_semantic_function_parameter_push(&semantic_function, parameter)) {
-                    ecsvm_semantic_parameter_free(&parameter);
-                    ecsvm_semantic_function_free(&semantic_function);
-                    ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting parameters");
-                    return 0;
+                for (parameter_index = child->first_child;
+                     parameter_index != 0u;
+                     parameter_index = nodes->items[parameter_index].next_sibling) {
+                    const ecsvm_syntax_node_t *parameter_node;
+                    ecsvm_semantic_parameter_t parameter;
+
+                    parameter_node = &nodes->items[parameter_index];
+                    if (parameter_node->kind != ECSVM_SYNTAX_PARAMETER) {
+                        continue;
+                    }
+
+                    memset(&parameter, 0, sizeof(parameter));
+                    parameter.name = ecsvm_tokens_to_name(file, parameter_node->name_start, parameter_node->name_end);
+                    parameter.type_name = ecsvm_tokens_to_name(file, parameter_node->type_start, parameter_node->type_end);
+                    parameter.default_value = (parameter_node->value_start != 0u || parameter_node->value_end != 0u)
+                        ? ecsvm_tokens_to_source(file, parameter_node->value_start, parameter_node->value_end)
+                        : NULL;
+                    if (parameter.name == NULL || parameter.type_name == NULL ||
+                        !ecsvm_semantic_function_parameter_push(&semantic_function, parameter)) {
+                        ecsvm_semantic_parameter_free(&parameter);
+                        ecsvm_semantic_function_free(&semantic_function);
+                        ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting parameters");
+                        return 0;
+                    }
                 }
             }
         }

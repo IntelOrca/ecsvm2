@@ -163,8 +163,8 @@ static int ecsvm_ast_build_group(
                         0u,
                         0u,
                         (uint32_t)kind,
-                        (uint32_t)cursor,
-                        (uint32_t)file->tokens.items[cursor].length
+                        ECSVM_AST_VALUE_NONE,
+                        (uint32_t)cursor
                     },
                     &node_index
                 )) {
@@ -181,26 +181,21 @@ static int ecsvm_ast_build_group(
     return 1;
 }
 
-static int ecsvm_build_function_ast_blob(
+static int ecsvm_build_function_ast_nodes(
     const ecsvm_source_file_t *file,
     size_t body_start,
     size_t body_end,
-    unsigned char **out_data,
-    size_t *out_length,
+    ecsvm_ast_node_array_t *out_nodes,
     char *error_message,
     size_t error_message_capacity
 )
 {
     ecsvm_ast_node_array_t nodes;
-    unsigned char *data;
-    size_t index;
-    size_t text_bytes;
-    size_t offset;
 
     memset(&nodes, 0, sizeof(nodes));
     if (!ecsvm_ast_node_array_push(
             &nodes,
-            (ecsvm_ast_node_t){ ECSVM_AST_NODE_ROOT, 0u, 0u, 0u, 0u, 0u, 0u },
+            (ecsvm_ast_node_t){ ECSVM_AST_NODE_ROOT, 0u, 0u, 0u, 0u, ECSVM_AST_VALUE_NONE, 0u },
             NULL
         ) ||
         !ecsvm_ast_build_group(
@@ -217,40 +212,7 @@ static int ecsvm_build_function_ast_blob(
         return 0;
     }
 
-    text_bytes = 0u;
-    for (index = 0u; index < nodes.count; ++index) {
-        if (nodes.items[index].kind == ECSVM_AST_NODE_TOKEN) {
-            text_bytes += nodes.items[index].text_length;
-        }
-    }
-
-    *out_length = sizeof(uint32_t) * 2u + nodes.count * sizeof(ecsvm_ast_node_t) + text_bytes;
-    data = (unsigned char *)malloc(*out_length);
-    if (data == NULL) {
-        free(nodes.items);
-        ecsvm_set_error(error_message, error_message_capacity, "out of memory while serializing function ast");
-        return 0;
-    }
-
-    ((uint32_t *)data)[0] = 1u;
-    ((uint32_t *)data)[1] = (uint32_t)nodes.count;
-    memcpy(data + sizeof(uint32_t) * 2u, nodes.items, nodes.count * sizeof(ecsvm_ast_node_t));
-    offset = sizeof(uint32_t) * 2u + nodes.count * sizeof(ecsvm_ast_node_t);
-    for (index = 0u; index < nodes.count; ++index) {
-        if (nodes.items[index].kind == ECSVM_AST_NODE_TOKEN) {
-            ecsvm_ast_node_t *node;
-            const ecsvm_token_t *token;
-
-            node = &((ecsvm_ast_node_t *)(data + sizeof(uint32_t) * 2u))[index];
-            token = &file->tokens.items[nodes.items[index].text_offset];
-            node->text_offset = (uint32_t)(offset - (sizeof(uint32_t) * 2u + nodes.count * sizeof(ecsvm_ast_node_t)));
-            memcpy(data + offset, file->source + token->offset, token->length);
-            offset += token->length;
-        }
-    }
-
-    free(nodes.items);
-    *out_data = data;
+    *out_nodes = nodes;
     return 1;
 }
 
@@ -474,6 +436,77 @@ static char *ecsvm_resolve_type_name(
     return ecsvm_copy_string(name);
 }
 
+static int ecsvm_find_semantic_function_by_suffix(
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *name
+)
+{
+    size_t index;
+    size_t name_length;
+    int match_index;
+
+    name_length = strlen(name);
+    match_index = -1;
+    for (index = 0u; index < semantic_functions->count; ++index) {
+        const char *qualified_name;
+        size_t qualified_length;
+
+        qualified_name = semantic_functions->items[index].qualified_name;
+        qualified_length = strlen(qualified_name);
+        if (strcmp(qualified_name, name) == 0 ||
+            (qualified_length > name_length &&
+             strcmp(qualified_name + qualified_length - name_length, name) == 0 &&
+             qualified_name[qualified_length - name_length - 1u] == '.')) {
+            if (match_index >= 0) {
+                return -1;
+            }
+            match_index = (int)index;
+        }
+    }
+
+    return match_index;
+}
+
+static char *ecsvm_resolve_function_name(
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *current_namespace,
+    const char *name
+)
+{
+    char *qualified_name;
+    int index;
+
+    index = ecsvm_find_semantic_function(semantic_functions, name);
+    if (index >= 0) {
+        return ecsvm_copy_string(semantic_functions->items[index].qualified_name);
+    }
+
+    if (strchr(name, '.') != NULL) {
+        index = ecsvm_find_semantic_function_by_suffix(semantic_functions, name);
+        if (index >= 0) {
+            return ecsvm_copy_string(semantic_functions->items[index].qualified_name);
+        }
+        return ecsvm_copy_string(name);
+    }
+
+    qualified_name = ecsvm_join_qualified_name(current_namespace, name);
+    if (qualified_name == NULL) {
+        return NULL;
+    }
+
+    index = ecsvm_find_semantic_function(semantic_functions, qualified_name);
+    if (index >= 0) {
+        return qualified_name;
+    }
+
+    free(qualified_name);
+    index = ecsvm_find_semantic_function_by_suffix(semantic_functions, name);
+    if (index >= 0) {
+        return ecsvm_copy_string(semantic_functions->items[index].qualified_name);
+    }
+    return ecsvm_copy_string(name);
+}
+
 static int ecsvm_collect_semantic_from_node(
     const ecsvm_source_file_t *file,
     const ecsvm_syntax_node_array_t *nodes,
@@ -647,18 +680,18 @@ static int ecsvm_collect_semantic_from_node(
         }
 
         if (node->has_body &&
-            !ecsvm_build_function_ast_blob(
+            !ecsvm_build_function_ast_nodes(
                 file,
                 node->body_start,
                 node->body_end,
-                &semantic_function.body_ast,
-                &semantic_function.body_ast_length,
+                &semantic_function.body_nodes,
                 error_message,
                 error_message_capacity
             )) {
             ecsvm_semantic_function_free(&semantic_function);
             return 0;
         }
+        semantic_function.body_source_file = node->has_body ? file : NULL;
 
         if (!ecsvm_semantic_function_array_push(semantic_functions, semantic_function)) {
             ecsvm_semantic_function_free(&semantic_function);
@@ -1041,6 +1074,334 @@ static uint32_t ecsvm_ensure_type_ref(
     return (uint32_t)type_refs->count;
 }
 
+static uint32_t ecsvm_find_field_ref_by_name(
+    const ecsvm_field_ref_builder_array_t *field_refs,
+    const char *name
+)
+{
+    size_t index;
+
+    for (index = 0u; index < field_refs->count; ++index) {
+        if (strcmp(field_refs->items[index].name, name) == 0) {
+            return (uint32_t)index + 1u;
+        }
+    }
+
+    return 0u;
+}
+
+static int ecsvm_token_requires_value(ecsvm_token_kind_t kind)
+{
+    return kind == ECSVM_TOKEN_IDENTIFIER ||
+        kind == ECSVM_TOKEN_NUMBER ||
+        kind == ECSVM_TOKEN_STRING;
+}
+
+static int ecsvm_token_is_type_context(
+    uint32_t parent_kind,
+    const ecsvm_ast_node_t *previous
+)
+{
+    if (parent_kind == ECSVM_AST_NODE_GROUP_BRACKET) {
+        return 1;
+    }
+
+    return previous != NULL &&
+        previous->kind == ECSVM_AST_NODE_TOKEN &&
+        previous->token_kind == ECSVM_TOKEN_COLON;
+}
+
+static uint32_t ecsvm_resolve_parameter_id(
+    const ecsvm_semantic_function_t *semantic_function,
+    const ecsvm_function_ref_builder_t *function_ref,
+    const char *text,
+    size_t length
+)
+{
+    size_t index;
+
+    if (function_ref->parameter_start == 0u) {
+        return 0u;
+    }
+
+    for (index = 0u; index < semantic_function->parameter_count; ++index) {
+        if (strlen(semantic_function->parameters[index].name) == length &&
+            memcmp(semantic_function->parameters[index].name, text, length) == 0) {
+            return function_ref->parameter_start + (uint32_t)index;
+        }
+    }
+
+    return 0u;
+}
+
+static int ecsvm_resolve_function_id(
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *current_namespace,
+    const char *text,
+    size_t length,
+    uint32_t *out_function_id
+)
+{
+    char *name;
+    char *qualified_name;
+    int function_index;
+
+    *out_function_id = 0u;
+    name = ecsvm_copy_string_range(text, length);
+    if (name == NULL) {
+        return 0;
+    }
+
+    qualified_name = ecsvm_resolve_function_name(semantic_functions, current_namespace, name);
+    free(name);
+    if (qualified_name == NULL) {
+        return 0;
+    }
+
+    function_index = ecsvm_find_semantic_function(semantic_functions, qualified_name);
+    free(qualified_name);
+    if (function_index >= 0) {
+        *out_function_id = (uint32_t)function_index + 1u;
+    }
+
+    return 1;
+}
+
+static int ecsvm_resolve_type_id(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *current_namespace,
+    const char *text,
+    size_t length,
+    const ecsvm_type_ref_builder_array_t *type_refs,
+    uint32_t *out_type_id
+)
+{
+    char *name;
+    char *qualified_name;
+
+    *out_type_id = 0u;
+    name = ecsvm_copy_string_range(text, length);
+    if (name == NULL) {
+        return 0;
+    }
+
+    qualified_name = ecsvm_resolve_type_name(semantic_structs, current_namespace, name);
+    free(name);
+    if (qualified_name == NULL) {
+        return 0;
+    }
+
+    *out_type_id = ecsvm_find_type_ref(type_refs, qualified_name);
+    free(qualified_name);
+    return 1;
+}
+
+static int ecsvm_serialize_function_ast_node(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const ecsvm_semantic_function_t *semantic_function,
+    const ecsvm_function_ref_builder_t *function_ref,
+    ecsvm_blob_array_t *blobs,
+    const ecsvm_type_ref_builder_array_t *type_refs,
+    const ecsvm_field_ref_builder_array_t *field_refs,
+    uint32_t node_index,
+    uint32_t parent_kind,
+    uint32_t previous_index,
+    ecsvm_ast_node_t *serialized_nodes,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    const ecsvm_ast_node_t *source_node;
+
+    source_node = &semantic_function->body_nodes.items[node_index];
+    serialized_nodes[node_index] = *source_node;
+    if (source_node->kind == ECSVM_AST_NODE_TOKEN) {
+        const ecsvm_ast_node_t *previous;
+        const ecsvm_ast_node_t *next;
+        const ecsvm_token_t *token;
+        const char *text;
+        uint32_t resolved_id;
+
+        previous = previous_index == 0u ? NULL : &semantic_function->body_nodes.items[previous_index];
+        next = source_node->next_sibling == 0u ? NULL : &semantic_function->body_nodes.items[source_node->next_sibling];
+        token = &semantic_function->body_source_file->tokens.items[source_node->value];
+        text = semantic_function->body_source_file->source + token->offset;
+        serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_NONE;
+        serialized_nodes[node_index].value = 0u;
+        if (!ecsvm_token_requires_value(token->kind)) {
+            return 1;
+        }
+
+        if (token->kind == ECSVM_TOKEN_IDENTIFIER) {
+            resolved_id = ecsvm_resolve_parameter_id(semantic_function, function_ref, text, token->length);
+            if (resolved_id != 0u) {
+                serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_PARAMETER_ID;
+                serialized_nodes[node_index].value = resolved_id;
+                return 1;
+            }
+
+            if (next != NULL &&
+                next->kind == ECSVM_AST_NODE_GROUP_PAREN &&
+                !ecsvm_resolve_function_id(
+                    semantic_functions,
+                    semantic_function->namespace_name,
+                    text,
+                    token->length,
+                    &resolved_id
+                )) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving function references");
+                return 0;
+            }
+            if (resolved_id != 0u) {
+                serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_FUNCTION_REF_ID;
+                serialized_nodes[node_index].value = resolved_id;
+                return 1;
+            }
+
+            if (ecsvm_token_is_type_context(parent_kind, previous) &&
+                !ecsvm_resolve_type_id(
+                    semantic_structs,
+                    semantic_function->namespace_name,
+                    text,
+                    token->length,
+                    type_refs,
+                    &resolved_id
+                )) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving type references");
+                return 0;
+            }
+            if (resolved_id != 0u) {
+                serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_TYPE_REF_ID;
+                serialized_nodes[node_index].value = resolved_id;
+                return 1;
+            }
+
+            if (previous != NULL &&
+                previous->kind == ECSVM_AST_NODE_TOKEN &&
+                previous->token_kind == ECSVM_TOKEN_DOT) {
+                char *field_name;
+
+                field_name = ecsvm_copy_string_range(text, token->length);
+                if (field_name == NULL) {
+                    ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving field references");
+                    return 0;
+                }
+                resolved_id = ecsvm_find_field_ref_by_name(field_refs, field_name);
+                free(field_name);
+                if (resolved_id != 0u) {
+                    serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_FIELD_REF_ID;
+                    serialized_nodes[node_index].value = resolved_id;
+                    return 1;
+                }
+            }
+        }
+
+        serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_BLOB_ID;
+        serialized_nodes[node_index].value = ecsvm_ensure_blob(blobs, text, token->length);
+        if (serialized_nodes[node_index].value == 0u) {
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while serializing function ast");
+            return 0;
+        }
+        return 1;
+    }
+
+    {
+        uint32_t child_index;
+        uint32_t previous_child_index;
+
+        child_index = source_node->first_child;
+        previous_child_index = 0u;
+        while (child_index != 0u) {
+            if (!ecsvm_serialize_function_ast_node(
+                    semantic_structs,
+                    semantic_functions,
+                    semantic_function,
+                    function_ref,
+                    blobs,
+                    type_refs,
+                    field_refs,
+                    child_index,
+                    source_node->kind,
+                    previous_child_index,
+                    serialized_nodes,
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+            previous_child_index = child_index;
+            child_index = semantic_function->body_nodes.items[child_index].next_sibling;
+        }
+    }
+
+    return 1;
+}
+
+static int ecsvm_serialize_function_ast_blob(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const ecsvm_semantic_function_t *semantic_function,
+    const ecsvm_function_ref_builder_t *function_ref,
+    ecsvm_blob_array_t *blobs,
+    const ecsvm_type_ref_builder_array_t *type_refs,
+    const ecsvm_field_ref_builder_array_t *field_refs,
+    unsigned char **out_data,
+    size_t *out_length,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    ecsvm_ast_node_t *serialized_nodes;
+    unsigned char *data;
+
+    *out_data = NULL;
+    *out_length = 0u;
+    if (semantic_function->body_nodes.count == 0u) {
+        return 1;
+    }
+
+    serialized_nodes = (ecsvm_ast_node_t *)malloc(semantic_function->body_nodes.count * sizeof(*serialized_nodes));
+    if (serialized_nodes == NULL) {
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while serializing function ast");
+        return 0;
+    }
+
+    if (!ecsvm_serialize_function_ast_node(
+            semantic_structs,
+            semantic_functions,
+            semantic_function,
+            function_ref,
+            blobs,
+            type_refs,
+            field_refs,
+            0u,
+            ECSVM_AST_NODE_ROOT,
+            0u,
+            serialized_nodes,
+            error_message,
+            error_message_capacity
+        )) {
+        free(serialized_nodes);
+        return 0;
+    }
+
+    *out_length = sizeof(uint32_t) * 2u + semantic_function->body_nodes.count * sizeof(*serialized_nodes);
+    data = (unsigned char *)malloc(*out_length);
+    if (data == NULL) {
+        free(serialized_nodes);
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while serializing function ast");
+        return 0;
+    }
+
+    ((uint32_t *)data)[0] = 2u;
+    ((uint32_t *)data)[1] = (uint32_t)semantic_function->body_nodes.count;
+    memcpy(data + sizeof(uint32_t) * 2u, serialized_nodes, semantic_function->body_nodes.count * sizeof(*serialized_nodes));
+    free(serialized_nodes);
+    *out_data = data;
+    return 1;
+}
+
 int ecsvm_build_ecsbin_tables(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const ecsvm_semantic_function_array_t *semantic_functions,
@@ -1163,12 +1524,9 @@ int ecsvm_build_ecsbin_tables(
         function_ref.parameter_count = (uint32_t)semantic_function->parameter_count;
         function_ref.attribute_start = (uint32_t)attributes->count + 1u;
         function_ref.attribute_count = 1u + (uint32_t)semantic_function->attribute_count;
-        function_ref.body_blob_id = semantic_function->body_ast_length == 0u
-            ? 0u
-            : ecsvm_ensure_blob(blobs, semantic_function->body_ast, semantic_function->body_ast_length);
+        function_ref.body_blob_id = 0u;
         if (function_ref.namespace_blob_id == 0u ||
-            function_ref.name_blob_id == 0u ||
-            (semantic_function->body_ast_length > 0u && function_ref.body_blob_id == 0u)) {
+            function_ref.name_blob_id == 0u) {
             free(function_ref.namespace_name);
             free(function_ref.name);
             return 0;
@@ -1230,6 +1588,38 @@ int ecsvm_build_ecsbin_tables(
             free(function_ref.namespace_name);
             free(function_ref.name);
             return 0;
+        }
+    }
+
+    for (struct_index = 0u; struct_index < semantic_functions->count; ++struct_index) {
+        const ecsvm_semantic_function_t *semantic_function;
+
+        semantic_function = &semantic_functions->items[struct_index];
+        if (semantic_function->body_nodes.count > 0u) {
+            unsigned char *body_ast;
+            size_t body_ast_length;
+            char ast_error[128];
+
+            if (!ecsvm_serialize_function_ast_blob(
+                    semantic_structs,
+                    semantic_functions,
+                    semantic_function,
+                    &function_refs->items[struct_index],
+                    blobs,
+                    type_refs,
+                    field_refs,
+                    &body_ast,
+                    &body_ast_length,
+                    ast_error,
+                    sizeof(ast_error)
+                )) {
+                return 0;
+            }
+            function_refs->items[struct_index].body_blob_id = ecsvm_ensure_blob(blobs, body_ast, body_ast_length);
+            free(body_ast);
+            if (function_refs->items[struct_index].body_blob_id == 0u) {
+                return 0;
+            }
         }
     }
 

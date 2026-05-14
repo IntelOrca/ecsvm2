@@ -357,7 +357,7 @@ void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function)
     free(function->name);
     free(function->qualified_name);
     free(function->return_type_name);
-    free(function->body_ast);
+    free(function->body_nodes.items);
     for (index = 0u; index < function->parameter_count; ++index) {
         ecsvm_semantic_parameter_free(&function->parameters[index]);
     }

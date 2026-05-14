@@ -35,6 +35,27 @@ static ecsvm_token_kind_t ecsvm_keyword_kind(const char *text, size_t length)
     if (length == 2u && memcmp(text, "fn", 2u) == 0) {
         return ECSVM_TOKEN_KEY_FN;
     }
+    if (length == 2u && memcmp(text, "if", 2u) == 0) {
+        return ECSVM_TOKEN_KEY_IF;
+    }
+    if (length == 4u && memcmp(text, "else", 4u) == 0) {
+        return ECSVM_TOKEN_KEY_ELSE;
+    }
+    if (length == 3u && memcmp(text, "let", 3u) == 0) {
+        return ECSVM_TOKEN_KEY_LET;
+    }
+    if (length == 6u && memcmp(text, "return", 6u) == 0) {
+        return ECSVM_TOKEN_KEY_RETURN;
+    }
+    if (length == 4u && memcmp(text, "true", 4u) == 0) {
+        return ECSVM_TOKEN_KEY_TRUE;
+    }
+    if (length == 5u && memcmp(text, "false", 5u) == 0) {
+        return ECSVM_TOKEN_KEY_FALSE;
+    }
+    if (length == 4u && memcmp(text, "null", 4u) == 0) {
+        return ECSVM_TOKEN_KEY_NULL;
+    }
 
     return ECSVM_TOKEN_IDENTIFIER;
 }

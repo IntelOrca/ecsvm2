@@ -150,7 +150,14 @@ typedef enum ecsvm_ecsbin_token_kind {
     ECSVM_ECSBIN_TOKEN_KEY_COMPONENT,
     ECSVM_ECSBIN_TOKEN_KEY_SYSTEM,
     ECSVM_ECSBIN_TOKEN_KEY_CONST,
-    ECSVM_ECSBIN_TOKEN_KEY_FN
+    ECSVM_ECSBIN_TOKEN_KEY_FN,
+    ECSVM_ECSBIN_TOKEN_KEY_IF,
+    ECSVM_ECSBIN_TOKEN_KEY_ELSE,
+    ECSVM_ECSBIN_TOKEN_KEY_LET,
+    ECSVM_ECSBIN_TOKEN_KEY_RETURN,
+    ECSVM_ECSBIN_TOKEN_KEY_TRUE,
+    ECSVM_ECSBIN_TOKEN_KEY_FALSE,
+    ECSVM_ECSBIN_TOKEN_KEY_NULL
 } ecsvm_ecsbin_token_kind_t;
 
 typedef enum ecsvm_ecsbin_ast_node_kind {
@@ -161,21 +168,28 @@ typedef enum ecsvm_ecsbin_ast_node_kind {
     ECSVM_ECSBIN_AST_NODE_TOKEN
 } ecsvm_ecsbin_ast_node_kind_t;
 
+typedef enum ecsvm_ecsbin_ast_value_kind {
+    ECSVM_ECSBIN_AST_VALUE_NONE = 0,
+    ECSVM_ECSBIN_AST_VALUE_BLOB_ID,
+    ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID,
+    ECSVM_ECSBIN_AST_VALUE_FIELD_REF_ID,
+    ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID,
+    ECSVM_ECSBIN_AST_VALUE_PARAMETER_ID
+} ecsvm_ecsbin_ast_value_kind_t;
+
 typedef struct ecsvm_ecsbin_ast_node {
     uint32_t kind;
     uint32_t first_child;
     uint32_t last_child;
     uint32_t next_sibling;
     uint32_t token_kind;
-    uint32_t text_offset;
-    uint32_t text_length;
+    uint32_t value_kind;
+    uint32_t value;
 } ecsvm_ecsbin_ast_node_t;
 
 typedef struct ecsvm_ecsbin_ast_blob {
     const ecsvm_ecsbin_ast_node_t *nodes;
     size_t node_count;
-    const unsigned char *text_data;
-    size_t text_length;
 } ecsvm_ecsbin_ast_blob_t;
 
 typedef struct ecsvm_ecsbin_text_buffer {
@@ -189,7 +203,7 @@ enum {
     ECSVM_ECSBIN_VERSION_1 = 0u,
     ECSVM_ECSBIN_VERSION_2_V1 = 1u,
     ECSVM_ECSBIN_VERSION_2 = 2u,
-    ECSVM_ECSBIN_AST_VERSION_1 = 1u
+    ECSVM_ECSBIN_AST_VERSION_2 = 2u
 };
 
 _Static_assert(sizeof(ecsvm_ecsbin_header_v1_t) == 80u, "ecsbin v1 header size");

@@ -89,6 +89,154 @@ static int ecsvm_ecsbin_text_buffer_append_indent(
     return 1;
 }
 
+static const char *ecsvm_ecsbin_token_text(ecsvm_ecsbin_token_kind_t kind)
+{
+    switch (kind) {
+        case ECSVM_ECSBIN_TOKEN_LBRACE: return "{";
+        case ECSVM_ECSBIN_TOKEN_RBRACE: return "}";
+        case ECSVM_ECSBIN_TOKEN_LBRACKET: return "[";
+        case ECSVM_ECSBIN_TOKEN_RBRACKET: return "]";
+        case ECSVM_ECSBIN_TOKEN_LPAREN: return "(";
+        case ECSVM_ECSBIN_TOKEN_RPAREN: return ")";
+        case ECSVM_ECSBIN_TOKEN_COLON: return ":";
+        case ECSVM_ECSBIN_TOKEN_SEMICOLON: return ";";
+        case ECSVM_ECSBIN_TOKEN_DOT: return ".";
+        case ECSVM_ECSBIN_TOKEN_COMMA: return ",";
+        case ECSVM_ECSBIN_TOKEN_EQUAL: return "=";
+        case ECSVM_ECSBIN_TOKEN_BANG: return "!";
+        case ECSVM_ECSBIN_TOKEN_PLUS: return "+";
+        case ECSVM_ECSBIN_TOKEN_MINUS: return "-";
+        case ECSVM_ECSBIN_TOKEN_STAR: return "*";
+        case ECSVM_ECSBIN_TOKEN_SLASH: return "/";
+        case ECSVM_ECSBIN_TOKEN_PERCENT: return "%";
+        case ECSVM_ECSBIN_TOKEN_LT: return "<";
+        case ECSVM_ECSBIN_TOKEN_GT: return ">";
+        case ECSVM_ECSBIN_TOKEN_AMPERSAND: return "&";
+        case ECSVM_ECSBIN_TOKEN_PIPE: return "|";
+        case ECSVM_ECSBIN_TOKEN_CARET: return "^";
+        case ECSVM_ECSBIN_TOKEN_TILDE: return "~";
+        case ECSVM_ECSBIN_TOKEN_KEY_IMPORT: return "import";
+        case ECSVM_ECSBIN_TOKEN_KEY_NAMESPACE: return "namespace";
+        case ECSVM_ECSBIN_TOKEN_KEY_STRUCT: return "struct";
+        case ECSVM_ECSBIN_TOKEN_KEY_COMPONENT: return "component";
+        case ECSVM_ECSBIN_TOKEN_KEY_SYSTEM: return "system";
+        case ECSVM_ECSBIN_TOKEN_KEY_CONST: return "const";
+        case ECSVM_ECSBIN_TOKEN_KEY_FN: return "fn";
+        case ECSVM_ECSBIN_TOKEN_KEY_IF: return "if";
+        case ECSVM_ECSBIN_TOKEN_KEY_ELSE: return "else";
+        case ECSVM_ECSBIN_TOKEN_KEY_LET: return "let";
+        case ECSVM_ECSBIN_TOKEN_KEY_RETURN: return "return";
+        case ECSVM_ECSBIN_TOKEN_KEY_TRUE: return "true";
+        case ECSVM_ECSBIN_TOKEN_KEY_FALSE: return "false";
+        case ECSVM_ECSBIN_TOKEN_KEY_NULL: return "null";
+        case ECSVM_ECSBIN_TOKEN_EOF:
+        case ECSVM_ECSBIN_TOKEN_IDENTIFIER:
+        case ECSVM_ECSBIN_TOKEN_NUMBER:
+        case ECSVM_ECSBIN_TOKEN_STRING:
+        default:
+            return NULL;
+    }
+}
+
+static ecsvm_status_t ecsvm_ecsbin_append_ast_token_value(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_node_t *node,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    switch (node->value_kind) {
+        case ECSVM_ECSBIN_AST_VALUE_NONE: {
+            const char *token_text;
+
+            token_text = ecsvm_ecsbin_token_text((ecsvm_ecsbin_token_kind_t)node->token_kind);
+            if (token_text == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body token text is not available");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, token_text)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_VALUE_BLOB_ID: {
+            const ecsvm_ecsbin_blob_t *blob;
+
+            blob = ecsvm_ecsbin_blob_ref(module, node->value);
+            if (blob == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body blob reference is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append_range(buffer, (const char *)blob->data, (size_t)blob->length)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID: {
+            const ecsvm_ecsbin_type_ref_t *type_ref;
+
+            type_ref = ecsvm_ecsbin_type_ref(module, node->value);
+            if (type_ref == NULL || type_ref->name == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body type reference is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, type_ref->name)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_VALUE_FIELD_REF_ID: {
+            const ecsvm_ecsbin_field_ref_t *field_ref;
+
+            if (node->value == 0u || node->value > module->field_ref_count) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body field reference is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            field_ref = &module->field_refs[node->value - 1u];
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, field_ref->name)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID: {
+            const ecsvm_ecsbin_function_ref_t *function_ref;
+
+            if (node->value == 0u || node->value > module->function_ref_count) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body function reference is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            function_ref = &module->function_refs[node->value - 1u];
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, function_ref->name)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_VALUE_PARAMETER_ID: {
+            const ecsvm_ecsbin_parameter_t *parameter;
+
+            parameter = ecsvm_ecsbin_parameter_ref(module, node->value);
+            if (parameter == NULL || parameter->name == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body parameter reference is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, parameter->name)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        default:
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body token value kind is not supported");
+            return ECSVM_ERROR_ARGUMENT;
+    }
+}
+
 static const ecsvm_ecsbin_ast_node_t *ecsvm_ecsbin_ast_node(
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t index,
@@ -137,7 +285,7 @@ static ecsvm_status_t ecsvm_ecsbin_parse_ast_blob(
 
     memcpy(&version, blob->data, sizeof(version));
     memcpy(&node_count, blob->data + sizeof(uint32_t), sizeof(node_count));
-    if (version != ECSVM_ECSBIN_AST_VERSION_1) {
+    if (version != ECSVM_ECSBIN_AST_VERSION_2) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body ast version is not supported");
         return ECSVM_ERROR_ARGUMENT;
     }
@@ -151,12 +299,11 @@ static ecsvm_status_t ecsvm_ecsbin_parse_ast_blob(
 
     out_ast->nodes = (const ecsvm_ecsbin_ast_node_t *)(const void *)(blob->data + header_bytes);
     out_ast->node_count = (size_t)node_count;
-    out_ast->text_data = blob->data + header_bytes + node_bytes;
-    out_ast->text_length = (size_t)blob->length - header_bytes - node_bytes;
     return ECSVM_OK;
 }
 
 static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
+    const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t child_index,
     ecsvm_ecsbin_text_buffer_t *buffer,
@@ -165,6 +312,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
 );
 
 static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
+    const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t node_index,
     ecsvm_ecsbin_text_buffer_t *buffer,
@@ -203,7 +351,27 @@ static int ecsvm_ecsbin_node_needs_no_trailing_space(
         node->token_kind == ECSVM_ECSBIN_TOKEN_TILDE;
 }
 
+static int ecsvm_ecsbin_nodes_need_no_space_between(
+    const ecsvm_ecsbin_ast_node_t *previous,
+    const ecsvm_ecsbin_ast_node_t *current
+)
+{
+    if (previous == NULL || current == NULL) {
+        return 0;
+    }
+
+    if (current->kind == ECSVM_ECSBIN_AST_NODE_GROUP_PAREN) {
+        return (previous->kind == ECSVM_ECSBIN_AST_NODE_TOKEN &&
+                previous->token_kind == ECSVM_ECSBIN_TOKEN_IDENTIFIER) ||
+            previous->kind == ECSVM_ECSBIN_AST_NODE_GROUP_PAREN ||
+            previous->kind == ECSVM_ECSBIN_AST_NODE_GROUP_BRACKET;
+    }
+
+    return 0;
+}
+
 static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
+    const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t node_index,
     size_t indent,
@@ -234,6 +402,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
 
     if (node->kind == ECSVM_ECSBIN_AST_NODE_ROOT) {
         return ecsvm_ecsbin_render_ast_inline(
+            module,
             ast,
             node->first_child,
             buffer,
@@ -288,6 +457,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
                     return ECSVM_ERROR_MEMORY;
                 }
                 status = ecsvm_ecsbin_render_ast_block(
+                    module,
                     ast,
                     child_index,
                     indent + 1u,
@@ -303,6 +473,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
             }
 
             if (previous != NULL &&
+                !ecsvm_ecsbin_nodes_need_no_space_between(previous, child) &&
                 !ecsvm_ecsbin_node_needs_no_leading_space(child) &&
                 !ecsvm_ecsbin_node_needs_no_trailing_space(previous) &&
                 !ecsvm_ecsbin_text_buffer_append_char(buffer, ' ')) {
@@ -311,6 +482,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
             }
 
             status = ecsvm_ecsbin_render_ast_inline_node(
+                module,
                 ast,
                 child_index,
                 buffer,
@@ -346,6 +518,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_block(
 }
 
 static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
+    const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t node_index,
     ecsvm_ecsbin_text_buffer_t *buffer,
@@ -368,20 +541,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
     }
 
     if (node->kind == ECSVM_ECSBIN_AST_NODE_TOKEN) {
-        if ((size_t)node->text_offset + (size_t)node->text_length > ast->text_length) {
-            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body token text is out of bounds");
-            return ECSVM_ERROR_ARGUMENT;
-        }
-
-        if (!ecsvm_ecsbin_text_buffer_append_range(
-                buffer,
-                (const char *)(ast->text_data + node->text_offset),
-                (size_t)node->text_length
-            )) {
-            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
-            return ECSVM_ERROR_MEMORY;
-        }
-        return ECSVM_OK;
+        return ecsvm_ecsbin_append_ast_token_value(module, node, buffer, error_message, error_message_capacity);
     }
 
     if (node->kind == ECSVM_ECSBIN_AST_NODE_GROUP_PAREN) {
@@ -393,6 +553,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
             ecsvm_status_t status;
 
             status = ecsvm_ecsbin_render_ast_inline(
+                module,
                 ast,
                 node->first_child,
                 buffer,
@@ -419,6 +580,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
             ecsvm_status_t status;
 
             status = ecsvm_ecsbin_render_ast_inline(
+                module,
                 ast,
                 node->first_child,
                 buffer,
@@ -438,6 +600,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
 
     if (node->kind == ECSVM_ECSBIN_AST_NODE_BLOCK) {
         return ecsvm_ecsbin_render_ast_block(
+            module,
             ast,
             node_index,
             0u,
@@ -452,6 +615,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline_node(
 }
 
 static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
+    const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_ast_blob_t *ast,
     uint32_t child_index,
     ecsvm_ecsbin_text_buffer_t *buffer,
@@ -474,6 +638,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
         }
 
         if (!first &&
+            !ecsvm_ecsbin_nodes_need_no_space_between(previous, node) &&
             !ecsvm_ecsbin_node_needs_no_leading_space(node) &&
             !ecsvm_ecsbin_node_needs_no_trailing_space(previous) &&
             !ecsvm_ecsbin_text_buffer_append_char(buffer, ' ')) {
@@ -482,6 +647,7 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
         }
 
         status = ecsvm_ecsbin_render_ast_inline_node(
+            module,
             ast,
             child_index,
             buffer,
@@ -533,6 +699,7 @@ ecsvm_status_t ecsvm_ecsbin_decompile_function_body(
 
     memset(&buffer, 0, sizeof(buffer));
     status = ecsvm_ecsbin_render_ast_block(
+        module,
         &ast,
         ast.nodes[0].first_child,
         0u,

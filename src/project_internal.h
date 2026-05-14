@@ -58,7 +58,14 @@ typedef enum ecsvm_token_kind {
     ECSVM_TOKEN_KEY_COMPONENT,
     ECSVM_TOKEN_KEY_SYSTEM,
     ECSVM_TOKEN_KEY_CONST,
-    ECSVM_TOKEN_KEY_FN
+    ECSVM_TOKEN_KEY_FN,
+    ECSVM_TOKEN_KEY_IF,
+    ECSVM_TOKEN_KEY_ELSE,
+    ECSVM_TOKEN_KEY_LET,
+    ECSVM_TOKEN_KEY_RETURN,
+    ECSVM_TOKEN_KEY_TRUE,
+    ECSVM_TOKEN_KEY_FALSE,
+    ECSVM_TOKEN_KEY_NULL
 } ecsvm_token_kind_t;
 
 typedef struct ecsvm_token {
@@ -163,6 +170,39 @@ typedef struct ecsvm_semantic_parameter {
     char *default_value;
 } ecsvm_semantic_parameter_t;
 
+typedef enum ecsvm_ast_node_kind {
+    ECSVM_AST_NODE_ROOT = 1,
+    ECSVM_AST_NODE_BLOCK,
+    ECSVM_AST_NODE_GROUP_PAREN,
+    ECSVM_AST_NODE_GROUP_BRACKET,
+    ECSVM_AST_NODE_TOKEN
+} ecsvm_ast_node_kind_t;
+
+typedef enum ecsvm_ast_value_kind {
+    ECSVM_AST_VALUE_NONE = 0,
+    ECSVM_AST_VALUE_BLOB_ID,
+    ECSVM_AST_VALUE_TYPE_REF_ID,
+    ECSVM_AST_VALUE_FIELD_REF_ID,
+    ECSVM_AST_VALUE_FUNCTION_REF_ID,
+    ECSVM_AST_VALUE_PARAMETER_ID
+} ecsvm_ast_value_kind_t;
+
+typedef struct ecsvm_ast_node {
+    uint32_t kind;
+    uint32_t first_child;
+    uint32_t last_child;
+    uint32_t next_sibling;
+    uint32_t token_kind;
+    uint32_t value_kind;
+    uint32_t value;
+} ecsvm_ast_node_t;
+
+typedef struct ecsvm_ast_node_array {
+    ecsvm_ast_node_t *items;
+    size_t count;
+    size_t capacity;
+} ecsvm_ast_node_array_t;
+
 typedef struct ecsvm_semantic_function {
     char *namespace_name;
     char *name;
@@ -174,8 +214,8 @@ typedef struct ecsvm_semantic_function {
     size_t attribute_count;
     size_t attribute_capacity;
     char *return_type_name;
-    unsigned char *body_ast;
-    size_t body_ast_length;
+    const ecsvm_source_file_t *body_source_file;
+    ecsvm_ast_node_array_t body_nodes;
 } ecsvm_semantic_function_t;
 
 typedef struct ecsvm_semantic_struct_array {
@@ -371,30 +411,6 @@ typedef struct ecsvm_blob_disk {
     uint64_t offset;
     uint64_t length;
 } ecsvm_blob_disk_t;
-
-typedef enum ecsvm_ast_node_kind {
-    ECSVM_AST_NODE_ROOT = 1,
-    ECSVM_AST_NODE_BLOCK,
-    ECSVM_AST_NODE_GROUP_PAREN,
-    ECSVM_AST_NODE_GROUP_BRACKET,
-    ECSVM_AST_NODE_TOKEN
-} ecsvm_ast_node_kind_t;
-
-typedef struct ecsvm_ast_node {
-    uint32_t kind;
-    uint32_t first_child;
-    uint32_t last_child;
-    uint32_t next_sibling;
-    uint32_t token_kind;
-    uint32_t text_offset;
-    uint32_t text_length;
-} ecsvm_ast_node_t;
-
-typedef struct ecsvm_ast_node_array {
-    ecsvm_ast_node_t *items;
-    size_t count;
-    size_t capacity;
-} ecsvm_ast_node_array_t;
 
 enum {
     ECSVM_ECSBIN_STRUCT_FLAG_COMPONENT = 1u

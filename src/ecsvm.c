@@ -1,4 +1,4 @@
-#include "ecsvm/ecsvm.h"
+#include "ecsvm_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +40,10 @@ struct ecsvm_engine {
     ecsvm_system_entry_t *systems;
     size_t system_count;
     size_t system_capacity;
+
+    ecsvm_function_entry_t *functions;
+    size_t function_count;
+    size_t function_capacity;
 
     ecsvm_blob_slot_t *blobs;
     size_t blob_count;
@@ -352,6 +356,91 @@ static ecsvm_status_t ecsvm_reserve_blobs(ecsvm_engine_t *engine, size_t minimum
     return ECSVM_OK;
 }
 
+static ecsvm_status_t ecsvm_reserve_functions(ecsvm_engine_t *engine, size_t minimum)
+{
+    ecsvm_function_entry_t *functions;
+    size_t capacity;
+
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    if (minimum <= engine->function_capacity) {
+        return ECSVM_OK;
+    }
+
+    capacity = ecsvm_next_capacity(engine->function_capacity, minimum);
+    functions = (ecsvm_function_entry_t *)realloc(engine->functions, capacity * sizeof(*functions));
+    if (functions == NULL) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    memset(functions + engine->function_capacity, 0, (capacity - engine->function_capacity) * sizeof(*functions));
+    engine->functions = functions;
+    engine->function_capacity = capacity;
+    return ECSVM_OK;
+}
+
+static void ecsvm_engine_set_error(
+    char *error_message,
+    size_t error_message_capacity,
+    const char *message
+)
+{
+    if (error_message == NULL || error_message_capacity == 0u) {
+        return;
+    }
+
+    if (message == NULL) {
+        error_message[0] = '\0';
+        return;
+    }
+
+    (void)snprintf(error_message, error_message_capacity, "%s", message);
+}
+
+static int ecsvm_parse_function_ast_blob(
+    const ecsvm_ecsbin_blob_t *blob,
+    ecsvm_ecsbin_ast_blob_t *out_ast,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    uint32_t version;
+    uint32_t node_count;
+    size_t node_bytes;
+    size_t header_bytes;
+
+    if (blob == NULL || out_ast == NULL) {
+        ecsvm_engine_set_error(error_message, error_message_capacity, "function body blob is required");
+        return 0;
+    }
+
+    if (blob->length < sizeof(uint32_t) * 2u) {
+        ecsvm_engine_set_error(error_message, error_message_capacity, "function body ast header is truncated");
+        return 0;
+    }
+
+    memcpy(&version, blob->data, sizeof(version));
+    memcpy(&node_count, blob->data + sizeof(uint32_t), sizeof(node_count));
+    if (version != ECSVM_ECSBIN_AST_VERSION_3) {
+        ecsvm_engine_set_error(error_message, error_message_capacity, "managed runtime only supports ast version 3");
+        return 0;
+    }
+
+    node_bytes = (size_t)node_count * sizeof(ecsvm_ecsbin_ast_node_t);
+    header_bytes = sizeof(uint32_t) * 2u;
+    if (node_count == 0u || header_bytes + node_bytes > blob->length) {
+        ecsvm_engine_set_error(error_message, error_message_capacity, "function body ast is truncated");
+        return 0;
+    }
+
+    out_ast->nodes = (const ecsvm_ecsbin_ast_node_t *)(const void *)(blob->data + header_bytes);
+    out_ast->node_count = (size_t)node_count;
+    out_ast->version = version;
+    return 1;
+}
+
 static ecsvm_blob_slot_t *ecsvm_blob_slot_mutable(ecsvm_engine_t *engine, ecsvm_blob_t blob)
 {
     size_t index;
@@ -422,11 +511,93 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine)
         free(engine->blobs[index].data);
     }
 
+    ecsvm_engine_clear_functions(engine);
     free(engine->entities);
     free(engine->components);
     free(engine->systems);
     free(engine->blobs);
     free(engine);
+}
+
+void ecsvm_engine_clear_functions(ecsvm_engine_t *engine)
+{
+    if (engine == NULL) {
+        return;
+    }
+
+    free(engine->functions);
+    engine->functions = NULL;
+    engine->function_count = 0u;
+    engine->function_capacity = 0u;
+}
+
+ecsvm_status_t ecsvm_engine_load_functions(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    ecsvm_status_t status;
+    size_t index;
+
+    ecsvm_engine_set_error(error_message, error_message_capacity, NULL);
+    if (engine == NULL || module == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    ecsvm_engine_clear_functions(engine);
+    if (module->function_ref_count == 0u) {
+        return ECSVM_OK;
+    }
+
+    status = ecsvm_reserve_functions(engine, module->function_ref_count);
+    if (status != ECSVM_OK) {
+        ecsvm_engine_set_error(error_message, error_message_capacity, "out of memory while preparing function table");
+        return status;
+    }
+
+    for (index = 0u; index < module->function_ref_count; ++index) {
+        const ecsvm_ecsbin_function_ref_t *function_ref;
+        ecsvm_function_entry_t *entry;
+
+        function_ref = &module->function_refs[index];
+        entry = &engine->functions[index];
+        memset(entry, 0, sizeof(*entry));
+        entry->function_ref = function_ref;
+        entry->native_callback = ecsvm_core_find_native_function(function_ref->qualified_name);
+
+        if (function_ref->body_blob_id != 0u) {
+            const ecsvm_ecsbin_blob_t *blob;
+
+            blob = ecsvm_ecsbin_blob_ref(module, function_ref->body_blob_id);
+            if (!ecsvm_parse_function_ast_blob(
+                    blob,
+                    &entry->managed_body,
+                    error_message,
+                    error_message_capacity
+                )) {
+                ecsvm_engine_clear_functions(engine);
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            entry->has_managed_body = 1;
+        }
+    }
+
+    engine->function_count = module->function_ref_count;
+    return ECSVM_OK;
+}
+
+const ecsvm_function_entry_t *ecsvm_engine_function(
+    const ecsvm_engine_t *engine,
+    uint32_t function_id
+)
+{
+    if (engine == NULL || function_id == 0u || function_id > engine->function_count) {
+        return NULL;
+    }
+
+    return &engine->functions[function_id - 1u];
 }
 
 ecsvm_status_t ecsvm_engine_register_builtin_components(ecsvm_engine_t *engine)

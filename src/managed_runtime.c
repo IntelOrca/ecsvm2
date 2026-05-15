@@ -1,5 +1,4 @@
-#include "ecsvm/ecsbin.h"
-#include "ecsvm/ecsvm.h"
+#include "ecsvm_internal.h"
 
 #include "bin_internal.h"
 
@@ -7,21 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef enum ecsvm_managed_value_kind {
-    ECSVM_MANAGED_VALUE_VOID = 0,
-    ECSVM_MANAGED_VALUE_NULL,
-    ECSVM_MANAGED_VALUE_BOOL,
-    ECSVM_MANAGED_VALUE_NUMBER,
-    ECSVM_MANAGED_VALUE_STRING
-} ecsvm_managed_value_kind_t;
-
-typedef struct ecsvm_managed_value {
-    ecsvm_managed_value_kind_t kind;
-    int boolean_value;
-    double number_value;
-    uint32_t blob_id;
-} ecsvm_managed_value_t;
 
 typedef struct ecsvm_managed_local {
     uint32_t name_blob_id;
@@ -52,56 +36,8 @@ typedef struct ecsvm_managed_system_binding {
 
 enum {
     ECSVM_MANAGED_STACK_BUFFER_CAPACITY = 128,
-    ECSVM_MANAGED_CALLEE_PREFIX_CAPACITY = 256,
     ECSVM_MANAGED_CALL_ARGUMENT_LIMIT = 16
 };
-
-static int ecsvm_managed_parse_ast_blob(
-    const ecsvm_ecsbin_blob_t *blob,
-    ecsvm_ecsbin_ast_blob_t *out_ast,
-    char *error_message,
-    size_t error_message_capacity
-)
-{
-    uint32_t version;
-    uint32_t node_count;
-    size_t node_bytes;
-    size_t header_bytes;
-
-    if (blob == NULL || out_ast == NULL) {
-        snprintf(error_message, error_message_capacity, "function body blob is required");
-        return 0;
-    }
-
-    if (blob->length < sizeof(uint32_t) * 2u) {
-        snprintf(error_message, error_message_capacity, "function body ast header is truncated");
-        return 0;
-    }
-
-    memcpy(&version, blob->data, sizeof(version));
-    memcpy(&node_count, blob->data + sizeof(uint32_t), sizeof(node_count));
-    if (version != ECSVM_ECSBIN_AST_VERSION_3) {
-        snprintf(
-            error_message,
-            error_message_capacity,
-            "managed runtime only supports ast version 3 (found %u)",
-            (unsigned)version
-        );
-        return 0;
-    }
-
-    node_bytes = (size_t)node_count * sizeof(ecsvm_ecsbin_ast_node_t);
-    header_bytes = sizeof(uint32_t) * 2u;
-    if (node_count == 0u || header_bytes + node_bytes > blob->length) {
-        snprintf(error_message, error_message_capacity, "function body ast is truncated");
-        return 0;
-    }
-
-    out_ast->nodes = (const ecsvm_ecsbin_ast_node_t *)(const void *)(blob->data + header_bytes);
-    out_ast->node_count = (size_t)node_count;
-    out_ast->version = version;
-    return 1;
-}
 
 static const ecsvm_ecsbin_blob_t *ecsvm_managed_blob(
     const ecsvm_ecsbin_module_t *module,
@@ -122,21 +58,6 @@ static int ecsvm_managed_blob_equals_cstr(
 
     blob = ecsvm_managed_blob(module, blob_id);
     length = strlen(text);
-    return blob != NULL &&
-        blob->length == length &&
-        (length == 0u || memcmp(blob->data, text, length) == 0);
-}
-
-static int ecsvm_managed_blob_equals_range(
-    const ecsvm_ecsbin_module_t *module,
-    uint32_t blob_id,
-    const char *text,
-    size_t length
-)
-{
-    const ecsvm_ecsbin_blob_t *blob;
-
-    blob = ecsvm_managed_blob(module, blob_id);
     return blob != NULL &&
         blob->length == length &&
         (length == 0u || memcmp(blob->data, text, length) == 0);
@@ -303,84 +224,6 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
     size_t argument_count,
     ecsvm_managed_value_t *out_value
 );
-
-static int ecsvm_managed_callee_matches_function(
-    const ecsvm_managed_frame_t *frame,
-    uint32_t node_index,
-    const char *qualified_name
-)
-{
-    const ecsvm_ecsbin_ast_node_t *node;
-
-    node = &frame->ast.nodes[node_index];
-    if (node->kind == ECSVM_ECSBIN_AST_NODE_IDENTIFIER) {
-        if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID) {
-            const ecsvm_ecsbin_function_ref_t *function_ref;
-
-            function_ref = &frame->runtime->module->function_refs[node->value - 1u];
-            return strcmp(function_ref->qualified_name, qualified_name) == 0;
-        }
-        if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_BLOB_ID) {
-            return ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, qualified_name);
-        }
-        return 0;
-    }
-
-    if (node->kind == ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION) {
-        const char *dot;
-        const ecsvm_ecsbin_ast_node_t *left_node;
-        const ecsvm_ecsbin_ast_node_t *right_node;
-        char prefix[ECSVM_MANAGED_CALLEE_PREFIX_CAPACITY];
-        size_t prefix_length;
-
-        dot = strrchr(qualified_name, '.');
-        left_node = &frame->ast.nodes[node->first_child];
-        right_node = &frame->ast.nodes[left_node->next_sibling];
-        if (dot == NULL ||
-            right_node->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
-            right_node->value_kind != ECSVM_ECSBIN_AST_VALUE_BLOB_ID ||
-            !ecsvm_managed_blob_equals_range(
-                frame->runtime->module,
-                right_node->value,
-                dot + 1,
-                strlen(dot + 1)
-            )) {
-            return 0;
-        }
-
-        prefix_length = (size_t)(dot - qualified_name);
-        if (prefix_length >= sizeof(prefix)) {
-            return 0;
-        }
-        memcpy(prefix, qualified_name, prefix_length);
-        prefix[prefix_length] = '\0';
-        return ecsvm_managed_callee_matches_function(frame, node->first_child, prefix);
-    }
-
-    return 0;
-}
-
-static int ecsvm_managed_resolve_callee_function_id(
-    const ecsvm_managed_frame_t *frame,
-    uint32_t node_index,
-    uint32_t *out_function_id
-)
-{
-    size_t function_index;
-
-    for (function_index = 0u; function_index < frame->runtime->module->function_ref_count; ++function_index) {
-        if (ecsvm_managed_callee_matches_function(
-                frame,
-                node_index,
-                frame->runtime->module->function_refs[function_index].qualified_name
-            )) {
-            *out_function_id = (uint32_t)function_index + 1u;
-            return 1;
-        }
-    }
-
-    return 0;
-}
 
 static ecsvm_status_t ecsvm_managed_eval_expression(
     ecsvm_managed_frame_t *frame,
@@ -562,8 +405,10 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             uint32_t function_id;
 
             callee = &frame->ast.nodes[node->first_child];
-            function_id = 0u;
-            if (!ecsvm_managed_resolve_callee_function_id(frame, node->first_child, &function_id)) {
+            function_id = node->value_kind == ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID
+                ? node->value
+                : 0u;
+            if (function_id == 0u) {
                 return ECSVM_ERROR_ARGUMENT;
             }
 
@@ -688,72 +533,6 @@ static ecsvm_status_t ecsvm_managed_execute_statement(
     }
 }
 
-static void ecsvm_managed_print_value(
-    const ecsvm_ecsbin_module_t *module,
-    const ecsvm_managed_value_t *value
-)
-{
-    switch (value->kind) {
-        case ECSVM_MANAGED_VALUE_VOID:
-            fputs("void", stdout);
-            break;
-        case ECSVM_MANAGED_VALUE_NULL:
-            fputs("null", stdout);
-            break;
-        case ECSVM_MANAGED_VALUE_BOOL:
-            fputs(value->boolean_value ? "true" : "false", stdout);
-            break;
-        case ECSVM_MANAGED_VALUE_NUMBER:
-            fprintf(stdout, "%g", value->number_value);
-            break;
-        case ECSVM_MANAGED_VALUE_STRING: {
-            const ecsvm_ecsbin_blob_t *blob;
-            blob = ecsvm_managed_blob(module, value->blob_id);
-            if (blob != NULL && blob->length >= 2u &&
-                blob->data[0] == '"' &&
-                blob->data[blob->length - 1u] == '"') {
-                fwrite(blob->data + 1u, 1u, (size_t)blob->length - 2u, stdout);
-            } else if (blob != NULL) {
-                fwrite(blob->data, 1u, (size_t)blob->length, stdout);
-            }
-            break;
-        }
-        default:
-            break;
-    }
-    fputc('\n', stdout);
-    fflush(stdout);
-}
-
-static ecsvm_status_t ecsvm_managed_execute_builtin(
-    ecsvm_managed_runtime_t *runtime,
-    const ecsvm_ecsbin_function_ref_t *function_ref,
-    const ecsvm_managed_value_t *arguments,
-    size_t argument_count,
-    ecsvm_managed_value_t *out_value
-)
-{
-    if (strcmp(function_ref->qualified_name, "core.Print") == 0) {
-        if (argument_count != 1u) {
-            return ECSVM_ERROR_ARGUMENT;
-        }
-        ecsvm_managed_print_value(runtime->module, &arguments[0]);
-        *out_value = ecsvm_managed_void_value();
-        return ECSVM_OK;
-    }
-
-    if (strcmp(function_ref->qualified_name, "core.Stop") == 0) {
-        if (argument_count != 0u) {
-            return ECSVM_ERROR_ARGUMENT;
-        }
-        ecsvm_engine_request_stop(runtime->engine);
-        *out_value = ecsvm_managed_void_value();
-        return ECSVM_OK;
-    }
-
-    return ECSVM_ERROR_NOT_FOUND;
-}
-
 static ecsvm_status_t ecsvm_managed_invoke_function(
     ecsvm_managed_runtime_t *runtime,
     uint32_t function_id,
@@ -762,26 +541,31 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
     ecsvm_managed_value_t *out_value
 )
 {
+    const ecsvm_function_entry_t *function_entry;
     const ecsvm_ecsbin_function_ref_t *function_ref;
-    const ecsvm_ecsbin_blob_t *body_blob;
     ecsvm_managed_frame_t frame;
     ecsvm_status_t status;
-    char error_message[256];
 
-    if (function_id == 0u || function_id > runtime->module->function_ref_count) {
+    function_entry = ecsvm_engine_function(runtime->engine, function_id);
+    if (function_entry == NULL || function_entry->function_ref == NULL) {
         return ECSVM_ERROR_NOT_FOUND;
     }
 
-    function_ref = &runtime->module->function_refs[function_id - 1u];
-    status = ecsvm_managed_execute_builtin(runtime, function_ref, arguments, argument_count, out_value);
-    if (status != ECSVM_ERROR_NOT_FOUND) {
-        return status;
-    }
-
+    function_ref = function_entry->function_ref;
     if (function_ref->parameter_count != argument_count) {
         return ECSVM_ERROR_ARGUMENT;
     }
-    if (function_ref->body_blob_id == 0u) {
+    if (function_entry->native_callback != NULL) {
+        return function_entry->native_callback(
+            runtime->engine,
+            runtime->module,
+            function_ref,
+            arguments,
+            argument_count,
+            out_value
+        );
+    }
+    if (!function_entry->has_managed_body) {
         return ECSVM_ERROR_NOT_FOUND;
     }
 
@@ -789,13 +573,8 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
     frame.runtime = runtime;
     frame.function_ref = function_ref;
     frame.arguments = (ecsvm_managed_value_t *)arguments;
+    frame.ast = function_entry->managed_body;
     frame.return_value = ecsvm_managed_void_value();
-
-    body_blob = ecsvm_managed_blob(runtime->module, function_ref->body_blob_id);
-    if (!ecsvm_managed_parse_ast_blob(body_blob, &frame.ast, error_message, sizeof(error_message))) {
-        fprintf(stderr, "managed runtime error: %s\n", error_message);
-        return ECSVM_ERROR_ARGUMENT;
-    }
 
     status = ecsvm_managed_execute_statement(&frame, frame.ast.nodes[0].first_child);
     if (status == ECSVM_OK) {
@@ -833,6 +612,7 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     size_t system_count;
     size_t function_index;
     ecsvm_status_t status;
+    char error_message[256];
     int exit_code;
 
     memset(&runtime, 0, sizeof(runtime));
@@ -862,12 +642,20 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
 
     runtime.engine = engine;
     runtime.module = module;
+    error_message[0] = '\0';
     status = ecsvm_engine_register_builtin_components(engine);
     if (status == ECSVM_OK) {
         status = ecsvm_ecsbin_register_components(engine, module);
     }
+    if (status == ECSVM_OK) {
+        status = ecsvm_engine_load_functions(engine, module, error_message, sizeof(error_message));
+    }
     if (status != ECSVM_OK) {
-        fprintf(stderr, "failed to register managed module state: %s\n", ecsvm_status_string(status));
+        if (error_message[0] != '\0') {
+            fprintf(stderr, "failed to register managed module state: %s\n", error_message);
+        } else {
+            fprintf(stderr, "failed to register managed module state: %s\n", ecsvm_status_string(status));
+        }
         ecsvm_engine_destroy(engine);
         return 1;
     }

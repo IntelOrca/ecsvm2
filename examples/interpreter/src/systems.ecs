@@ -5,8 +5,21 @@ namespace app {
         return "hello from ecs";
     }
 
+    fn mathStatus(): string {
+        if (core.math.min(4.0, 2.0) == 2.0) {
+            if (core.math.max(4.0, 2.0) == 4.0) {
+                if (core.math.clamp(9.0, 1.0, 5.0) == 5.0) {
+                    return "math ok";
+                }
+            }
+        }
+
+        return "math failed";
+    }
+
     system SayHello() {
         core.Print(message());
+        core.Print(mathStatus());
     }
 
     system Halt() {

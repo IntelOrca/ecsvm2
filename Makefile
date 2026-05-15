@@ -28,6 +28,10 @@ COMMON_SRCS := \
 	src/xml.c
 
 COMMON_OBJS := $(COMMON_SRCS:src/%.c=$(OBJ_DIR)/%.o)
+EXAMPLE_PROJECTS := $(wildcard examples/*/project.toml)
+EXAMPLE_DIRS := $(patsubst %/project.toml,%,$(EXAMPLE_PROJECTS))
+EXAMPLE_TARGETS := $(foreach dir,$(EXAMPLE_DIRS),$(dir)/out/$(notdir $(dir)).ecsbin)
+EXAMPLE_OUT_DIRS := $(addsuffix /out,$(EXAMPLE_DIRS))
 
 CPPFLAGS := -DECSVM_ENABLE_SDL3=$(ECSVM_ENABLE_SDL3) -Iinclude
 CFLAGS ?= -std=c99 -Wall -Wextra -Werror -pedantic
@@ -66,9 +70,11 @@ OBJS := $(COMMON_OBJS) $(SDL3_OBJS)
 CPPFLAGS += $(SDL3_CFLAGS)
 LDLIBS += $(SDL3_LIBS)
 
-.PHONY: all clean
+.PHONY: all clean examples
 
 all: $(TARGET) $(CORE_ECSBIN)
+
+examples: $(TARGET) $(CORE_ECSBIN) $(EXAMPLE_TARGETS)
 
 $(TARGET): $(OBJS) | $(BUILD_DIR)
 	$(CC) $(OBJS) -o $@ $(LDLIBS)
@@ -83,4 +89,11 @@ $(CORE_ECSBIN): $(TARGET) $(wildcard $(CORE_PROJECT)/src/*.ecs) $(CORE_PROJECT)/
 	./$(TARGET) build $(CORE_PROJECT) > /dev/null
 
 clean:
-	rm -rf $(BUILD_DIR) $(OBJ_DIR) $(CORE_PROJECT)/out
+	rm -rf $(BUILD_DIR) $(OBJ_DIR) $(CORE_PROJECT)/out $(EXAMPLE_OUT_DIRS)
+
+define example_rule
+$(1)/out/$(notdir $(1)).ecsbin: $(TARGET) $(CORE_ECSBIN) $(1)/project.toml $$(shell find $(1)/src -type f -name '*.ecs' 2>/dev/null)
+	./$(TARGET) build --core-lib $(CORE_ECSBIN) $(1)
+endef
+
+$(foreach dir,$(EXAMPLE_DIRS),$(eval $(call example_rule,$(dir))))

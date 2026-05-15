@@ -1221,7 +1221,12 @@ static int ecsvm_resolve_type_id(
         return 0;
     }
 
-    *out_type_id = ecsvm_find_type_ref(type_refs, qualified_name);
+    {
+        int type_index;
+
+        type_index = ecsvm_find_type_ref(type_refs, qualified_name);
+        *out_type_id = type_index < 0 ? 0u : (uint32_t)type_index + 1u;
+    }
     free(qualified_name);
     return 1;
 }

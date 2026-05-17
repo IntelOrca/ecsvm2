@@ -116,6 +116,21 @@ static int ecsvm_managed_blob_equals_cstr(
         (length == 0u || memcmp(blob->data, text, length) == 0);
 }
 
+static int ecsvm_managed_blob_equals_range(
+    const ecsvm_ecsbin_module_t *module,
+    uint32_t blob_id,
+    const char *text,
+    size_t length
+)
+{
+    const ecsvm_ecsbin_blob_t *blob;
+
+    blob = ecsvm_managed_blob(module, blob_id);
+    return blob != NULL &&
+        blob->length == length &&
+        (length == 0u || memcmp(blob->data, text, length) == 0);
+}
+
 static int ecsvm_managed_blob_to_double(
     const ecsvm_ecsbin_module_t *module,
     uint32_t blob_id,
@@ -281,6 +296,84 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
     size_t argument_count,
     ecsvm_managed_value_t *out_value
 );
+
+static int ecsvm_managed_callee_matches_function(
+    const ecsvm_managed_frame_t *frame,
+    uint32_t node_index,
+    const char *qualified_name
+)
+{
+    const ecsvm_ecsbin_ast_node_t *node;
+
+    node = &frame->ast.nodes[node_index];
+    if (node->kind == ECSVM_ECSBIN_AST_NODE_IDENTIFIER) {
+        if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID) {
+            const ecsvm_ecsbin_function_ref_t *function_ref;
+
+            function_ref = &frame->runtime->module->function_refs[node->value - 1u];
+            return strcmp(function_ref->qualified_name, qualified_name) == 0;
+        }
+        if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_BLOB_ID) {
+            return ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, qualified_name);
+        }
+        return 0;
+    }
+
+    if (node->kind == ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION) {
+        const char *dot;
+        const ecsvm_ecsbin_ast_node_t *left_node;
+        const ecsvm_ecsbin_ast_node_t *right_node;
+        char prefix[256];
+        size_t prefix_length;
+
+        dot = strrchr(qualified_name, '.');
+        left_node = &frame->ast.nodes[node->first_child];
+        right_node = &frame->ast.nodes[left_node->next_sibling];
+        if (dot == NULL ||
+            right_node->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
+            right_node->value_kind != ECSVM_ECSBIN_AST_VALUE_BLOB_ID ||
+            !ecsvm_managed_blob_equals_range(
+                frame->runtime->module,
+                right_node->value,
+                dot + 1,
+                strlen(dot + 1)
+            )) {
+            return 0;
+        }
+
+        prefix_length = (size_t)(dot - qualified_name);
+        if (prefix_length >= sizeof(prefix)) {
+            return 0;
+        }
+        memcpy(prefix, qualified_name, prefix_length);
+        prefix[prefix_length] = '\0';
+        return ecsvm_managed_callee_matches_function(frame, node->first_child, prefix);
+    }
+
+    return 0;
+}
+
+static int ecsvm_managed_resolve_callee_function_id(
+    const ecsvm_managed_frame_t *frame,
+    uint32_t node_index,
+    uint32_t *out_function_id
+)
+{
+    size_t function_index;
+
+    for (function_index = 0u; function_index < frame->runtime->module->function_ref_count; ++function_index) {
+        if (ecsvm_managed_callee_matches_function(
+                frame,
+                node_index,
+                frame->runtime->module->function_refs[function_index].qualified_name
+            )) {
+            *out_function_id = (uint32_t)function_index + 1u;
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 static ecsvm_status_t ecsvm_managed_eval_expression(
     ecsvm_managed_frame_t *frame,
@@ -456,10 +549,11 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             ecsvm_managed_value_t arguments[16];
             size_t argument_count;
             uint32_t child_index;
+            uint32_t function_id;
 
             callee = &frame->ast.nodes[node->first_child];
-            if (callee->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
-                callee->value_kind != ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID) {
+            function_id = 0u;
+            if (!ecsvm_managed_resolve_callee_function_id(frame, node->first_child, &function_id)) {
                 return ECSVM_ERROR_ARGUMENT;
             }
 
@@ -482,7 +576,7 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
 
             return ecsvm_managed_invoke_function(
                 frame->runtime,
-                callee->value,
+                function_id,
                 arguments,
                 argument_count,
                 out_value

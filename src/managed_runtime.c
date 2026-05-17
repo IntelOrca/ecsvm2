@@ -50,6 +50,12 @@ typedef struct ecsvm_managed_system_binding {
     uint32_t function_id;
 } ecsvm_managed_system_binding_t;
 
+enum {
+    ECSVM_MANAGED_STACK_BUFFER_CAPACITY = 128,
+    ECSVM_MANAGED_CALLEE_PREFIX_CAPACITY = 256,
+    ECSVM_MANAGED_CALL_ARGUMENT_LIMIT = 16
+};
+
 static int ecsvm_managed_parse_ast_blob(
     const ecsvm_ecsbin_blob_t *blob,
     ecsvm_ecsbin_ast_blob_t *out_ast,
@@ -143,7 +149,7 @@ static int ecsvm_managed_blob_to_double(
 )
 {
     const ecsvm_ecsbin_blob_t *blob;
-    char stack_buffer[128];
+    char stack_buffer[ECSVM_MANAGED_STACK_BUFFER_CAPACITY];
     char *buffer;
     char *endptr;
     int ok;
@@ -324,7 +330,7 @@ static int ecsvm_managed_callee_matches_function(
         const char *dot;
         const ecsvm_ecsbin_ast_node_t *left_node;
         const ecsvm_ecsbin_ast_node_t *right_node;
-        char prefix[256];
+        char prefix[ECSVM_MANAGED_CALLEE_PREFIX_CAPACITY];
         size_t prefix_length;
 
         dot = strrchr(qualified_name, '.');
@@ -550,7 +556,7 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
         case ECSVM_ECSBIN_AST_NODE_CALL_EXPRESSION: {
             const ecsvm_ecsbin_ast_node_t *callee;
             const ecsvm_ecsbin_ast_node_t *argument_list;
-            ecsvm_managed_value_t arguments[16];
+            ecsvm_managed_value_t arguments[ECSVM_MANAGED_CALL_ARGUMENT_LIMIT];
             size_t argument_count;
             uint32_t child_index;
             uint32_t function_id;

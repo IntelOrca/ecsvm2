@@ -37,7 +37,7 @@
 - attribute_start: uint32 (attribute reference id)
 - attribute_count: uint32
 
-# Field Definitions
+## Field Definitions
 - field_id: uint32 (field reference id)
 - attribute_start: uint32
 - attribute_count: uint32
@@ -71,3 +71,56 @@ Function attributes always start with the return type attribute. The attribute p
 Blob table entries are followed by the raw blob payload region. Each blob `offset` is relative to the start of that payload region.
 
 Function bodies are stored in blobs as serialized AST payloads.
+
+## AST blobs
+
+Function bodies use AST blobs with this layout:
+
+- version: uint32 - Must be `2`
+- node_count: uint32
+- nodes: `ecsvm_ecsbin_ast_node_t[node_count]`
+
+The root node is always stored at index `0`. Child and sibling links use `0` as the sentinel for “no child/sibling”, so linked node indices start at `1` and never refer to the root node.
+
+### AST nodes
+
+- kind: uint32
+- first_child: uint32
+- last_child: uint32
+- next_sibling: uint32
+- token_kind: uint32
+- value_kind: uint32
+- value: uint32
+
+### AST node kinds
+
+- `1` - root
+- `2` - block
+- `3` - parenthesized group
+- `4` - bracketed group
+- `5` - token
+
+### AST value kinds
+
+- `0` - none
+- `1` - blob id
+- `2` - type reference id
+- `3` - field reference id
+- `4` - function reference id
+- `5` - parameter id
+
+### Token kinds
+
+Token nodes use the same token enum as the parser. The supported token kinds are:
+
+- punctuation: `(` `)` `{` `}` `[` `]` `:` `;` `.` `,` `=` `!` `+` `-` `*` `/` `%` `<` `>` `&` `|` `^` `~`
+- keywords: `import` `namespace` `struct` `component` `attribute` `system` `const` `fn` `if` `else` `let` `return` `true` `false` `null`
+- identifiers, numbers, and strings are stored as blobs or references through `value_kind`
+
+### Value resolution
+
+- `blob id` values point at raw blob payloads
+- `type reference id` values resolve to type names
+- `field reference id` values resolve to field names
+- `function reference id` values resolve to function names
+- `parameter id` values resolve to parameter names

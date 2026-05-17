@@ -134,6 +134,12 @@ const ecsvm_ecsbin_type_ref_t *ecsvm_ecsbin_function_return_type(
     const ecsvm_ecsbin_function_ref_t *function_ref
 );
 
+int ecsvm_ecsbin_function_has_attribute(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    const char *qualified_name
+);
+
 ecsvm_status_t ecsvm_ecsbin_decompile_function_body(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,

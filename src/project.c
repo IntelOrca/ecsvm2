@@ -466,6 +466,44 @@ static int ecsvm_import_struct_attributes(
     return 1;
 }
 
+static int ecsvm_import_function_attributes(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    ecsvm_semantic_function_t *semantic_function,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    size_t attribute_index;
+
+    if (function_ref->attribute_count == 0u) {
+        return 1;
+    }
+
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+        char *attribute_name;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref == NULL || type_ref->qualified_name == NULL) {
+            ecsvm_set_error(error_message, error_message_capacity, "core library function attribute is invalid");
+            return 0;
+        }
+
+        attribute_name = ecsvm_copy_string(type_ref->qualified_name);
+        if (attribute_name == NULL ||
+            !ecsvm_semantic_function_attribute_push(semantic_function, attribute_name)) {
+            free(attribute_name);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library function attributes");
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int ecsvm_import_core_library(
     const char *core_library_path,
     ecsvm_semantic_struct_array_t *semantic_structs,
@@ -655,6 +693,18 @@ static int ecsvm_import_core_library(
                 ecsvm_ecsbin_unload(&module);
                 return 0;
             }
+        }
+
+        if (!ecsvm_import_function_attributes(
+                &module,
+                function_ref,
+                &semantic_function,
+                error_message,
+                error_message_capacity
+            )) {
+            ecsvm_semantic_function_free(&semantic_function);
+            ecsvm_ecsbin_unload(&module);
+            return 0;
         }
 
         if (!ecsvm_semantic_function_array_push(semantic_functions, semantic_function)) {

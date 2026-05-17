@@ -359,6 +359,34 @@ const ecsvm_ecsbin_type_ref_t *ecsvm_ecsbin_function_return_type(
     return ecsvm_ecsbin_type_ref(module, attribute->type_id);
 }
 
+int ecsvm_ecsbin_function_has_attribute(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    const char *qualified_name
+)
+{
+    size_t attribute_index;
+
+    if (module == NULL || function_ref == NULL || qualified_name == NULL) {
+        return 0;
+    }
+
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref != NULL &&
+            type_ref->qualified_name != NULL &&
+            strcmp(type_ref->qualified_name, qualified_name) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 
 const ecsvm_ecsbin_struct_def_t *ecsvm_ecsbin_find_struct(
     const ecsvm_ecsbin_module_t *module,

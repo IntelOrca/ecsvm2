@@ -196,9 +196,22 @@ typedef struct ecsvm_semantic_parameter {
 typedef enum ecsvm_ast_node_kind {
     ECSVM_AST_NODE_ROOT = 1,
     ECSVM_AST_NODE_BLOCK,
-    ECSVM_AST_NODE_GROUP_PAREN,
-    ECSVM_AST_NODE_GROUP_BRACKET,
-    ECSVM_AST_NODE_TOKEN
+    ECSVM_AST_NODE_DECLARATION,
+    ECSVM_AST_NODE_RETURN_STATEMENT,
+    ECSVM_AST_NODE_IF_STATEMENT,
+    ECSVM_AST_NODE_ELSE_CLAUSE,
+    ECSVM_AST_NODE_EXPRESSION_STATEMENT,
+    ECSVM_AST_NODE_ASSIGNMENT_EXPRESSION,
+    ECSVM_AST_NODE_BINARY_EXPRESSION,
+    ECSVM_AST_NODE_UNARY_EXPRESSION,
+    ECSVM_AST_NODE_CALL_EXPRESSION,
+    ECSVM_AST_NODE_ARGUMENT_LIST,
+    ECSVM_AST_NODE_MEMBER_EXPRESSION,
+    ECSVM_AST_NODE_INDEX_EXPRESSION,
+    ECSVM_AST_NODE_GROUPING_EXPRESSION,
+    ECSVM_AST_NODE_LITERAL_EXPRESSION,
+    ECSVM_AST_NODE_IDENTIFIER,
+    ECSVM_AST_NODE_TYPE_EXPRESSION
 } ecsvm_ast_node_kind_t;
 
 typedef enum ecsvm_ast_value_kind {
@@ -459,6 +472,7 @@ int ecsvm_semantic_struct_array_push(ecsvm_semantic_struct_array_t *array, ecsvm
 void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct);
 void ecsvm_semantic_struct_array_free(ecsvm_semantic_struct_array_t *array);
 int ecsvm_semantic_function_parameter_push(ecsvm_semantic_function_t *function, ecsvm_semantic_parameter_t parameter);
+int ecsvm_semantic_function_attribute_push(ecsvm_semantic_function_t *function, char *attribute_name);
 int ecsvm_semantic_function_array_push(ecsvm_semantic_function_array_t *array, ecsvm_semantic_function_t function);
 void ecsvm_semantic_parameter_free(ecsvm_semantic_parameter_t *parameter);
 void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function);

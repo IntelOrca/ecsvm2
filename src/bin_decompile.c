@@ -286,7 +286,8 @@ static ecsvm_status_t ecsvm_ecsbin_parse_ast_blob(
 
     memcpy(&version, blob->data, sizeof(version));
     memcpy(&node_count, blob->data + sizeof(uint32_t), sizeof(node_count));
-    if (version != ECSVM_ECSBIN_AST_VERSION_2) {
+    if (version != ECSVM_ECSBIN_AST_VERSION_2 &&
+        version != ECSVM_ECSBIN_AST_VERSION_3) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function body ast version is not supported");
         return ECSVM_ERROR_ARGUMENT;
     }
@@ -300,6 +301,7 @@ static ecsvm_status_t ecsvm_ecsbin_parse_ast_blob(
 
     out_ast->nodes = (const ecsvm_ecsbin_ast_node_t *)(const void *)(blob->data + header_bytes);
     out_ast->node_count = (size_t)node_count;
+    out_ast->version = version;
     return ECSVM_OK;
 }
 
@@ -667,6 +669,487 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_inline(
     return ECSVM_OK;
 }
 
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_expression(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t node_index,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+);
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_statement(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t node_index,
+    size_t indent,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+);
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_value(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_node_t *node,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_NONE) {
+        return ECSVM_OK;
+    }
+
+    return ecsvm_ecsbin_append_ast_token_value(
+        module,
+        node,
+        buffer,
+        error_message,
+        error_message_capacity
+    );
+}
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_expression_list(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t child_index,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    int first;
+
+    first = 1;
+    while (child_index != 0u) {
+        const ecsvm_ecsbin_ast_node_t *node;
+        ecsvm_status_t status;
+
+        node = ecsvm_ecsbin_ast_node(ast, child_index, error_message, error_message_capacity);
+        if (node == NULL) {
+            return ECSVM_ERROR_ARGUMENT;
+        }
+
+        if (!first && !ecsvm_ecsbin_text_buffer_append(buffer, ", ")) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling function body");
+            return ECSVM_ERROR_MEMORY;
+        }
+
+        status = ecsvm_ecsbin_render_ast_v3_expression(
+            module,
+            ast,
+            child_index,
+            buffer,
+            error_message,
+            error_message_capacity
+        );
+        if (status != ECSVM_OK) {
+            return status;
+        }
+
+        first = 0;
+        child_index = node->next_sibling;
+    }
+
+    return ECSVM_OK;
+}
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_expression(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t node_index,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    const ecsvm_ecsbin_ast_node_t *node;
+
+    node = ecsvm_ecsbin_ast_node(ast, node_index, error_message, error_message_capacity);
+    if (node == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    switch (node->kind) {
+        case ECSVM_ECSBIN_AST_NODE_IDENTIFIER:
+        case ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION:
+        case ECSVM_ECSBIN_AST_NODE_LITERAL_EXPRESSION:
+            return ecsvm_ecsbin_render_ast_v3_value(module, node, buffer, error_message, error_message_capacity);
+        case ECSVM_ECSBIN_AST_NODE_GROUPING_EXPRESSION: {
+            ecsvm_status_t status;
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            status = ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, ')')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_NODE_ARGUMENT_LIST:
+            return ecsvm_ecsbin_render_ast_v3_expression_list(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+        case ECSVM_ECSBIN_AST_NODE_CALL_EXPRESSION: {
+            const ecsvm_ecsbin_ast_node_t *callee;
+            const ecsvm_ecsbin_ast_node_t *arguments;
+            ecsvm_status_t status;
+
+            callee = node->first_child == 0u ? NULL : ecsvm_ecsbin_ast_node(ast, node->first_child, error_message, error_message_capacity);
+            arguments = (callee != NULL && callee->next_sibling != 0u)
+                ? ecsvm_ecsbin_ast_node(ast, callee->next_sibling, error_message, error_message_capacity)
+                : NULL;
+            if (callee == NULL || arguments == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "call expression is malformed");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            status = ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            status = ecsvm_ecsbin_render_ast_v3_expression_list(
+                module,
+                ast,
+                arguments->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, ')')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION:
+        case ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION:
+        case ECSVM_ECSBIN_AST_NODE_ASSIGNMENT_EXPRESSION:
+        case ECSVM_ECSBIN_AST_NODE_BINARY_EXPRESSION: {
+            const ecsvm_ecsbin_ast_node_t *left;
+            const ecsvm_ecsbin_ast_node_t *right;
+            ecsvm_status_t status;
+
+            left = node->first_child == 0u ? NULL : ecsvm_ecsbin_ast_node(ast, node->first_child, error_message, error_message_capacity);
+            right = (left != NULL && left->next_sibling != 0u)
+                ? ecsvm_ecsbin_ast_node(ast, left->next_sibling, error_message, error_message_capacity)
+                : NULL;
+            if (left == NULL || right == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "binary expression is malformed");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            status = ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+            if (status != ECSVM_OK) {
+                return status;
+            }
+
+            if (node->kind == ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION) {
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '.')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+            } else if (node->kind == ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION) {
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '[')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+            } else {
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, ' ')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_value(module, node, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, ' ')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+            }
+
+            status = ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                left->next_sibling,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+            if (status != ECSVM_OK) {
+                return status;
+            }
+
+            if (node->kind == ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION &&
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, ']')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_NODE_UNARY_EXPRESSION: {
+            ecsvm_status_t status;
+            status = ecsvm_ecsbin_render_ast_v3_value(module, node, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            return ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+        }
+        default:
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "unsupported ast expression node");
+            return ECSVM_ERROR_ARGUMENT;
+    }
+}
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_block(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t node_index,
+    size_t indent,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    const ecsvm_ecsbin_ast_node_t *node;
+    uint32_t child_index;
+
+    node = ecsvm_ecsbin_ast_node(ast, node_index, error_message, error_message_capacity);
+    if (node == NULL || node->kind != ECSVM_ECSBIN_AST_NODE_BLOCK) {
+        ecsvm_ecsbin_set_error(error_message, error_message_capacity, "expected block ast node");
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '{') ||
+        !ecsvm_ecsbin_text_buffer_append_char(buffer, '\n')) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    child_index = node->first_child;
+    while (child_index != 0u) {
+        ecsvm_status_t status;
+        status = ecsvm_ecsbin_render_ast_v3_statement(
+            module,
+            ast,
+            child_index,
+            indent + 1u,
+            buffer,
+            error_message,
+            error_message_capacity
+        );
+        if (status != ECSVM_OK) {
+            return status;
+        }
+        child_index = ast->nodes[child_index].next_sibling;
+    }
+
+    if (!ecsvm_ecsbin_text_buffer_append_indent(buffer, indent) ||
+        !ecsvm_ecsbin_text_buffer_append_char(buffer, '}')) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    return ECSVM_OK;
+}
+
+static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_statement(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_ast_blob_t *ast,
+    uint32_t node_index,
+    size_t indent,
+    ecsvm_ecsbin_text_buffer_t *buffer,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    const ecsvm_ecsbin_ast_node_t *node;
+    ecsvm_status_t status;
+
+    node = ecsvm_ecsbin_ast_node(ast, node_index, error_message, error_message_capacity);
+    if (node == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    if (!ecsvm_ecsbin_text_buffer_append_indent(buffer, indent)) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    switch (node->kind) {
+        case ECSVM_ECSBIN_AST_NODE_BLOCK:
+            status = ecsvm_ecsbin_render_ast_v3_block(module, ast, node_index, indent, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            return ecsvm_ecsbin_text_buffer_append_char(buffer, '\n') ? ECSVM_OK : ECSVM_ERROR_MEMORY;
+        case ECSVM_ECSBIN_AST_NODE_DECLARATION: {
+            const ecsvm_ecsbin_ast_node_t *name_node;
+            const ecsvm_ecsbin_ast_node_t *type_node;
+            const ecsvm_ecsbin_ast_node_t *value_node;
+
+            name_node = node->first_child == 0u ? NULL : ecsvm_ecsbin_ast_node(ast, node->first_child, error_message, error_message_capacity);
+            type_node = (name_node != NULL && name_node->next_sibling != 0u)
+                ? ecsvm_ecsbin_ast_node(ast, name_node->next_sibling, error_message, error_message_capacity)
+                : NULL;
+            value_node = type_node;
+            if (type_node != NULL && type_node->kind == ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION) {
+                value_node = type_node->next_sibling == 0u
+                    ? NULL
+                    : ecsvm_ecsbin_ast_node(ast, type_node->next_sibling, error_message, error_message_capacity);
+            } else {
+                type_node = NULL;
+            }
+
+            if (name_node == NULL ||
+                !ecsvm_ecsbin_text_buffer_append(buffer, "let ")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, node->first_child, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (type_node != NULL) {
+                if (!ecsvm_ecsbin_text_buffer_append(buffer, ": ")) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, name_node->next_sibling, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+            }
+            if (value_node != NULL) {
+                if (!ecsvm_ecsbin_text_buffer_append(buffer, " = ")) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, type_node != NULL ? type_node->next_sibling : name_node->next_sibling, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, ";\n")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_NODE_RETURN_STATEMENT:
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, "return")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            if (node->first_child != 0u) {
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, ' ')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, node->first_child, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+            }
+            return ecsvm_ecsbin_text_buffer_append(buffer, ";\n") ? ECSVM_OK : ECSVM_ERROR_MEMORY;
+        case ECSVM_ECSBIN_AST_NODE_EXPRESSION_STATEMENT:
+            status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, node->first_child, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            return ecsvm_ecsbin_text_buffer_append(buffer, ";\n") ? ECSVM_OK : ECSVM_ERROR_MEMORY;
+        case ECSVM_ECSBIN_AST_NODE_IF_STATEMENT: {
+            const ecsvm_ecsbin_ast_node_t *condition_node;
+            const ecsvm_ecsbin_ast_node_t *then_node;
+            const ecsvm_ecsbin_ast_node_t *else_node;
+
+            condition_node = node->first_child == 0u ? NULL : ecsvm_ecsbin_ast_node(ast, node->first_child, error_message, error_message_capacity);
+            then_node = (condition_node != NULL && condition_node->next_sibling != 0u)
+                ? ecsvm_ecsbin_ast_node(ast, condition_node->next_sibling, error_message, error_message_capacity)
+                : NULL;
+            else_node = (then_node != NULL && then_node->next_sibling != 0u)
+                ? ecsvm_ecsbin_ast_node(ast, then_node->next_sibling, error_message, error_message_capacity)
+                : NULL;
+            if (condition_node == NULL || then_node == NULL ||
+                !ecsvm_ecsbin_text_buffer_append(buffer, "if (")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, node->first_child, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, ") ")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            if (then_node->kind == ECSVM_ECSBIN_AST_NODE_BLOCK) {
+                status = ecsvm_ecsbin_render_ast_v3_block(module, ast, condition_node->next_sibling, indent, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+            } else {
+                if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '\n')) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_statement(module, ast, condition_node->next_sibling, indent + 1u, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+                if (!ecsvm_ecsbin_text_buffer_append_indent(buffer, indent)) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+            }
+            if (else_node != NULL) {
+                if (!ecsvm_ecsbin_text_buffer_append(buffer, " else ")) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_statement(module, ast, then_node->next_sibling, indent, buffer, error_message, error_message_capacity);
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+                return ECSVM_OK;
+            }
+            return ecsvm_ecsbin_text_buffer_append_char(buffer, '\n') ? ECSVM_OK : ECSVM_ERROR_MEMORY;
+        }
+        case ECSVM_ECSBIN_AST_NODE_ELSE_CLAUSE:
+            if (node->first_child == 0u) {
+                return ECSVM_OK;
+            }
+            return ecsvm_ecsbin_render_ast_v3_statement(module, ast, node->first_child, indent, buffer, error_message, error_message_capacity);
+        default:
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "unsupported ast statement node");
+            return ECSVM_ERROR_ARGUMENT;
+    }
+}
+
 ecsvm_status_t ecsvm_ecsbin_decompile_function_body(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
@@ -699,15 +1182,27 @@ ecsvm_status_t ecsvm_ecsbin_decompile_function_body(
     }
 
     memset(&buffer, 0, sizeof(buffer));
-    status = ecsvm_ecsbin_render_ast_block(
-        module,
-        &ast,
-        ast.nodes[0].first_child,
-        0u,
-        &buffer,
-        error_message,
-        error_message_capacity
-    );
+    if (ast.version == ECSVM_ECSBIN_AST_VERSION_2) {
+        status = ecsvm_ecsbin_render_ast_block(
+            module,
+            &ast,
+            ast.nodes[0].first_child,
+            0u,
+            &buffer,
+            error_message,
+            error_message_capacity
+        );
+    } else {
+        status = ecsvm_ecsbin_render_ast_v3_block(
+            module,
+            &ast,
+            ast.nodes[0].first_child,
+            0u,
+            &buffer,
+            error_message,
+            error_message_capacity
+        );
+    }
     if (status != ECSVM_OK) {
         free(buffer.data);
         return status;
@@ -971,16 +1466,18 @@ static ecsvm_status_t ecsvm_append_decompiled_function(
     const ecsvm_ecsbin_function_ref_t *function_ref;
     const ecsvm_ecsbin_type_ref_t *return_type;
     size_t parameter_index;
+    int is_system;
 
     function_ref = &module->function_refs[function_index];
     return_type = ecsvm_ecsbin_function_return_type(module, function_ref);
+    is_system = ecsvm_ecsbin_function_has_attribute(module, function_ref, "core.System");
     if (return_type == NULL) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function return type is invalid");
         return ECSVM_ERROR_ARGUMENT;
     }
 
     if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||
-        !ecsvm_ecsbin_text_buffer_append(buffer, "fn ") ||
+        !ecsvm_ecsbin_text_buffer_append(buffer, is_system ? "system " : "fn ") ||
         !ecsvm_ecsbin_text_buffer_append(buffer, function_ref->name) ||
         !ecsvm_ecsbin_text_buffer_append_char(buffer, '(')) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
@@ -1026,7 +1523,8 @@ static ecsvm_status_t ecsvm_append_decompiled_function(
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
         return ECSVM_ERROR_MEMORY;
     }
-    if (strcmp(return_type->qualified_name, "core.Void") != 0 &&
+    if (!is_system &&
+        strcmp(return_type->qualified_name, "core.Void") != 0 &&
         (!ecsvm_ecsbin_text_buffer_append(buffer, ": ") ||
          !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(return_type, current_namespace)))) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");

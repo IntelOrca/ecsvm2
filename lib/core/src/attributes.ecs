@@ -21,4 +21,9 @@ namespace core {
      * Marks the type or field as deprecated. A warning will be emitted when used.
      */
     attribute Deprecated;
+
+    /**
+     * Marks a function as a managed runtime system.
+     */
+    attribute System;
 }

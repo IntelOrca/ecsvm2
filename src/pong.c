@@ -628,7 +628,7 @@ static int pong_run(const ecsvm_ecsbin_module_t *module)
 
     exit_code = 0;
     while (!ecsvm_window_system_should_close(window_system)) {
-        status = ecsvm_engine_run(engine);
+        status = ecsvm_engine_tick(engine);
         if (status != ECSVM_OK) {
             fprintf(stderr, "pong runtime failed: %s\n", ecsvm_status_string(status));
             exit_code = 1;

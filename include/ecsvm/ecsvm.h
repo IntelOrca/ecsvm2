@@ -101,7 +101,11 @@ ecsvm_status_t ecsvm_engine_register_system(
     size_t *out_system_index
 );
 
+ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine);
 ecsvm_status_t ecsvm_engine_run(ecsvm_engine_t *engine);
+void ecsvm_engine_request_stop(ecsvm_engine_t *engine);
+void ecsvm_engine_clear_stop(ecsvm_engine_t *engine);
+int ecsvm_engine_stop_requested(const ecsvm_engine_t *engine);
 size_t ecsvm_engine_system_count(const ecsvm_engine_t *engine);
 
 ecsvm_entity_t ecsvm_entity_create(ecsvm_engine_t *engine);

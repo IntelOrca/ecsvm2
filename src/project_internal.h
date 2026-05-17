@@ -236,6 +236,10 @@ typedef struct ecsvm_ast_node {
     uint32_t value;
 } ecsvm_ast_node_t;
 
+enum {
+    ECSVM_AST_VERSION_3 = 3u
+};
+
 typedef struct ecsvm_ast_node_array {
     ecsvm_ast_node_t *items;
     size_t count;

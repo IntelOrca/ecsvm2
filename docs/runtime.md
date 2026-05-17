@@ -43,7 +43,9 @@ Systems are registered in engine order. Each system executes with a context cont
 - its registered name
 - an API table with `alloc`, `free`, `log`, and `userdata`
 
-The runtime does not yet define a managed bytecode interpreter. Current system execution is native-C callback based.
+The runtime supports managed function execution from `.ecsbin` AST payloads for a small core language subset.
+Functions marked with the `core.System` attribute are registered as runtime systems.
+Native-C callback systems remain supported alongside managed systems.
 
 ## Blobs and strings
 

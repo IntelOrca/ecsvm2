@@ -196,6 +196,9 @@ typedef struct ecsvm_semantic_parameter {
 typedef enum ecsvm_ast_node_kind {
     ECSVM_AST_NODE_ROOT = 1,
     ECSVM_AST_NODE_BLOCK,
+    ECSVM_AST_NODE_GROUP_PAREN = 3,
+    ECSVM_AST_NODE_GROUP_BRACKET = 4,
+    ECSVM_AST_NODE_TOKEN = 5,
     ECSVM_AST_NODE_DECLARATION,
     ECSVM_AST_NODE_RETURN_STATEMENT,
     ECSVM_AST_NODE_IF_STATEMENT,

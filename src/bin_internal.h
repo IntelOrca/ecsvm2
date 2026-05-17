@@ -164,9 +164,25 @@ typedef enum ecsvm_ecsbin_token_kind {
 typedef enum ecsvm_ecsbin_ast_node_kind {
     ECSVM_ECSBIN_AST_NODE_ROOT = 1,
     ECSVM_ECSBIN_AST_NODE_BLOCK,
-    ECSVM_ECSBIN_AST_NODE_GROUP_PAREN,
-    ECSVM_ECSBIN_AST_NODE_GROUP_BRACKET,
-    ECSVM_ECSBIN_AST_NODE_TOKEN
+    ECSVM_ECSBIN_AST_NODE_GROUP_PAREN = 3,
+    ECSVM_ECSBIN_AST_NODE_GROUP_BRACKET = 4,
+    ECSVM_ECSBIN_AST_NODE_TOKEN = 5,
+    ECSVM_ECSBIN_AST_NODE_DECLARATION,
+    ECSVM_ECSBIN_AST_NODE_RETURN_STATEMENT,
+    ECSVM_ECSBIN_AST_NODE_IF_STATEMENT,
+    ECSVM_ECSBIN_AST_NODE_ELSE_CLAUSE,
+    ECSVM_ECSBIN_AST_NODE_EXPRESSION_STATEMENT,
+    ECSVM_ECSBIN_AST_NODE_ASSIGNMENT_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_BINARY_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_UNARY_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_CALL_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_ARGUMENT_LIST,
+    ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_GROUPING_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_LITERAL_EXPRESSION,
+    ECSVM_ECSBIN_AST_NODE_IDENTIFIER,
+    ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION
 } ecsvm_ecsbin_ast_node_kind_t;
 
 typedef enum ecsvm_ecsbin_ast_value_kind {
@@ -191,6 +207,7 @@ typedef struct ecsvm_ecsbin_ast_node {
 typedef struct ecsvm_ecsbin_ast_blob {
     const ecsvm_ecsbin_ast_node_t *nodes;
     size_t node_count;
+    uint32_t version;
 } ecsvm_ecsbin_ast_blob_t;
 
 typedef struct ecsvm_ecsbin_text_buffer {
@@ -204,7 +221,8 @@ enum {
     ECSVM_ECSBIN_VERSION_1 = 0u,
     ECSVM_ECSBIN_VERSION_2_V1 = 1u,
     ECSVM_ECSBIN_VERSION_2 = 2u,
-    ECSVM_ECSBIN_AST_VERSION_2 = 2u
+    ECSVM_ECSBIN_AST_VERSION_2 = 2u,
+    ECSVM_ECSBIN_AST_VERSION_3 = 3u
 };
 
 _Static_assert(sizeof(ecsvm_ecsbin_header_v1_t) == 80u, "ecsbin v1 header size");

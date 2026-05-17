@@ -46,6 +46,7 @@ struct ecsvm_engine {
     size_t blob_capacity;
 
     ecsvm_component_id_t hierarchy_component;
+    int stop_requested;
 };
 
 static void *ecsvm_default_alloc(void *userdata, size_t size)
@@ -571,7 +572,7 @@ ecsvm_status_t ecsvm_engine_register_system(
     return ECSVM_OK;
 }
 
-ecsvm_status_t ecsvm_engine_run(ecsvm_engine_t *engine)
+ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine)
 {
     ecsvm_context_t context;
     ecsvm_status_t status;
@@ -596,6 +597,44 @@ ecsvm_status_t ecsvm_engine_run(ecsvm_engine_t *engine)
     }
 
     return ECSVM_OK;
+}
+
+ecsvm_status_t ecsvm_engine_run(ecsvm_engine_t *engine)
+{
+    ecsvm_status_t status;
+
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    engine->stop_requested = 0;
+    do {
+        status = ecsvm_engine_tick(engine);
+        if (status != ECSVM_OK) {
+            return status;
+        }
+    } while (!engine->stop_requested);
+
+    return ECSVM_OK;
+}
+
+void ecsvm_engine_request_stop(ecsvm_engine_t *engine)
+{
+    if (engine != NULL) {
+        engine->stop_requested = 1;
+    }
+}
+
+void ecsvm_engine_clear_stop(ecsvm_engine_t *engine)
+{
+    if (engine != NULL) {
+        engine->stop_requested = 0;
+    }
+}
+
+int ecsvm_engine_stop_requested(const ecsvm_engine_t *engine)
+{
+    return engine != NULL && engine->stop_requested != 0;
 }
 
 size_t ecsvm_engine_system_count(const ecsvm_engine_t *engine)
@@ -957,4 +996,3 @@ const char *ecsvm_status_string(ecsvm_status_t status)
         return "unknown-status";
     }
 }
-

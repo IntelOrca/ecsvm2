@@ -338,6 +338,25 @@ int ecsvm_semantic_function_parameter_push(
     return 1;
 }
 
+int ecsvm_semantic_function_attribute_push(
+    ecsvm_semantic_function_t *function,
+    char *attribute_name
+)
+{
+    if (!ecsvm_reserve_bytes(
+            (void **)&function->attributes,
+            sizeof(*function->attributes),
+            &function->attribute_capacity,
+            function->attribute_count + 1u
+        )) {
+        return 0;
+    }
+
+    function->attributes[function->attribute_count] = attribute_name;
+    function->attribute_count += 1u;
+    return 1;
+}
+
 int ecsvm_semantic_function_array_push(
     ecsvm_semantic_function_array_t *array,
     ecsvm_semantic_function_t function

@@ -1,0 +1,16 @@
+import core;
+
+namespace app {
+    fn message(): string {
+        return "hello from ecs";
+    }
+
+    system SayHello() {
+        core.Print(message());
+    }
+
+    system Halt() {
+        core.Print("stopping");
+        core.Stop();
+    }
+}

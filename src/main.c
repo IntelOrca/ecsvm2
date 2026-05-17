@@ -23,6 +23,7 @@ static demo_components_t g_demo_components;
 
 int ecsvm_run_pong(void);
 int ecsvm_run_pong_binary(const char *ecsbin_path);
+int ecsvm_run_ecsbin(const char *ecsbin_path);
 
 static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
 {
@@ -410,7 +411,7 @@ static int run_self_test(void)
         return 1;
     }
 
-    status = ecsvm_engine_run(engine);
+    status = ecsvm_engine_tick(engine);
     if (status != ECSVM_OK) {
         fprintf(stderr, "runtime failed: %s\n", ecsvm_status_string(status));
         ecsvm_engine_destroy(engine);
@@ -558,7 +559,7 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        return ecsvm_run_pong_binary(binary_path);
+        return ecsvm_run_ecsbin(binary_path);
     }
 
     if (argc - argi == 2 && strcmp(argv[argi], "decompile") == 0) {

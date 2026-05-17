@@ -19,6 +19,7 @@ COMMON_SRCS := \
 	src/ecs_parser.c \
 	src/ecsvm.c \
 	src/logger.c \
+	src/managed_runtime.c \
 	src/main.c \
 	src/pong.c \
 	src/project.c \

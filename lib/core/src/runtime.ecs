@@ -1,0 +1,4 @@
+namespace core {
+    fn Print(message: string);
+    fn Stop();
+}

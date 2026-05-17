@@ -1312,14 +1312,14 @@ static int ecsvm_serialize_operator_blob(
 
     if (source_node->kind == ECSVM_AST_NODE_UNARY_EXPRESSION) {
         if (left == NULL || source_node->token_kind >= left->token_kind) {
-            ecsvm_set_error(error_message, error_message_capacity, "invalid unary operator in function ast");
+            ecsvm_set_error(error_message, error_message_capacity, "invalid unary operator token range in function ast");
             return 0;
         }
         token_start = source_node->token_kind;
         token_end = left->token_kind - 1u;
     } else {
         if (left == NULL || right == NULL || left->value_kind >= right->token_kind) {
-            ecsvm_set_error(error_message, error_message_capacity, "invalid operator in function ast");
+            ecsvm_set_error(error_message, error_message_capacity, "invalid binary operator token ordering in function ast");
             return 0;
         }
         token_start = left->value_kind + 1u;
@@ -1576,7 +1576,7 @@ static int ecsvm_serialize_function_ast_blob(
         return 0;
     }
 
-    ((uint32_t *)data)[0] = 3u;
+    ((uint32_t *)data)[0] = ECSVM_AST_VERSION_3;
     ((uint32_t *)data)[1] = (uint32_t)semantic_function->body_nodes.count;
     memcpy(data + sizeof(uint32_t) * 2u, serialized_nodes, semantic_function->body_nodes.count * sizeof(*serialized_nodes));
     free(serialized_nodes);

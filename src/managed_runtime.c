@@ -75,7 +75,12 @@ static int ecsvm_managed_parse_ast_blob(
     memcpy(&version, blob->data, sizeof(version));
     memcpy(&node_count, blob->data + sizeof(uint32_t), sizeof(node_count));
     if (version != ECSVM_ECSBIN_AST_VERSION_3) {
-        snprintf(error_message, error_message_capacity, "managed runtime only supports ast version 3");
+        snprintf(
+            error_message,
+            error_message_capacity,
+            "managed runtime only supports ast version 3 (found %u)",
+            (unsigned)version
+        );
         return 0;
     }
 
@@ -487,6 +492,9 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
                 } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "*")) {
                     out_value->number_value = left.number_value * right.number_value;
                 } else {
+                    if (right.number_value == 0.0) {
+                        return ECSVM_ERROR_ARGUMENT;
+                    }
                     out_value->number_value = left.number_value / right.number_value;
                 }
                 return ECSVM_OK;

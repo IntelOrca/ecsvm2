@@ -371,6 +371,7 @@ int ecsvm_ecsbin_function_has_attribute(
         return 0;
     }
 
+    /* Function attribute slot 0 stores the return type. */
     for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
         const ecsvm_ecsbin_attribute_t *attribute;
         const ecsvm_ecsbin_type_ref_t *type_ref;

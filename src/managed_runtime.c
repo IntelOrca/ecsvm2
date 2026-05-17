@@ -190,10 +190,6 @@ static int ecsvm_managed_values_equal(
 )
 {
     if (left->kind != right->kind) {
-        if (left->kind == ECSVM_MANAGED_VALUE_NUMBER &&
-            right->kind == ECSVM_MANAGED_VALUE_NUMBER) {
-            return left->number_value == right->number_value;
-        }
         return 0;
     }
 
@@ -703,6 +699,8 @@ static void ecsvm_managed_print_value(
                 blob->data[0] == '"' &&
                 blob->data[blob->length - 1u] == '"') {
                 fwrite(blob->data + 1u, 1u, (size_t)blob->length - 2u, stdout);
+            } else if (blob != NULL) {
+                fwrite(blob->data, 1u, (size_t)blob->length, stdout);
             }
             break;
         }

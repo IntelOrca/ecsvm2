@@ -116,6 +116,7 @@ static int ecsvm_build_function_ast_from_syntax_node(
     syntax_node = &syntax_nodes->items[syntax_node_index];
     memset(&ast_node, 0, sizeof(ast_node));
     ast_node.kind = ecsvm_ast_kind_from_syntax(syntax_node->kind);
+    /* Source AST nodes temporarily reuse these fields to carry token ranges until serialization. */
     ast_node.token_kind = (uint32_t)syntax_node->token_start;
     ast_node.value_kind = (uint32_t)syntax_node->token_end;
     if (ast_node.kind == 0u) {

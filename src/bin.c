@@ -585,6 +585,17 @@ ecsvm_status_t ecsvm_ecsbin_register_components(
             return ECSVM_ERROR_ARGUMENT;
         }
 
+        if (strcmp(type_ref->qualified_name, "core.Hierarchy") == 0) {
+            if (definition->size != sizeof(ecsvm_hierarchy_component_t)) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            status = ecsvm_engine_register_builtin_components(engine);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            continue;
+        }
+
         desc.name = type_ref->qualified_name;
         desc.size = definition->size;
         desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;

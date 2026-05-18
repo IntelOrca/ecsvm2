@@ -130,6 +130,46 @@ static const char *ecsvm_managed_type_name(
     return type_ref != NULL ? type_ref->qualified_name : NULL;
 }
 
+static int ecsvm_managed_component_type(
+    const ecsvm_managed_runtime_t *runtime,
+    uint32_t type_id,
+    const ecsvm_ecsbin_struct_def_t **out_definition,
+    ecsvm_component_id_t *out_component_id
+)
+{
+    const ecsvm_ecsbin_type_ref_t *type_ref;
+    const ecsvm_ecsbin_struct_def_t *definition;
+    ecsvm_component_id_t component_id;
+
+    if (runtime == NULL) {
+        return 0;
+    }
+
+    type_ref = ecsvm_ecsbin_type_ref(runtime->module, type_id);
+    definition = type_ref != NULL
+        ? ecsvm_ecsbin_find_struct(runtime->module, type_ref->qualified_name)
+        : NULL;
+    if (type_ref == NULL ||
+        type_ref->qualified_name == NULL ||
+        definition == NULL ||
+        !ecsvm_ecsbin_struct_is_component(runtime->module, definition)) {
+        return 0;
+    }
+
+    component_id = ecsvm_engine_find_component(runtime->engine, type_ref->qualified_name);
+    if (component_id == ECSVM_INVALID_COMPONENT) {
+        return 0;
+    }
+
+    if (out_definition != NULL) {
+        *out_definition = definition;
+    }
+    if (out_component_id != NULL) {
+        *out_component_id = component_id;
+    }
+    return 1;
+}
+
 static int ecsvm_managed_is_scalar_type_name(const char *qualified_name)
 {
     return qualified_name != NULL &&
@@ -528,7 +568,6 @@ static int ecsvm_managed_component_pointer(
     void **out_pointer
 )
 {
-    const ecsvm_ecsbin_type_ref_t *type_ref;
     const ecsvm_ecsbin_struct_def_t *definition;
     ecsvm_component_id_t component_id;
     void *component_data;
@@ -537,19 +576,12 @@ static int ecsvm_managed_component_pointer(
         return 0;
     }
 
-    type_ref = ecsvm_ecsbin_type_ref(frame->runtime->module, type_id);
-    definition = type_ref != NULL
-        ? ecsvm_ecsbin_find_struct(frame->runtime->module, type_ref->qualified_name)
-        : NULL;
-    if (type_ref == NULL ||
-        type_ref->qualified_name == NULL ||
-        definition == NULL ||
-        !ecsvm_ecsbin_struct_is_component(frame->runtime->module, definition)) {
-        return 0;
-    }
-
-    component_id = ecsvm_engine_find_component(frame->runtime->engine, type_ref->qualified_name);
-    if (component_id == ECSVM_INVALID_COMPONENT) {
+    if (!ecsvm_managed_component_type(
+            frame->runtime,
+            type_id,
+            &definition,
+            &component_id
+        )) {
         return 0;
     }
 
@@ -1068,6 +1100,66 @@ static ecsvm_status_t ecsvm_managed_execute_statement(
                 else_node->first_child != 0u) {
                 return ecsvm_managed_execute_statement(frame, else_node->first_child);
             }
+            return ECSVM_OK;
+        }
+        case ECSVM_ECSBIN_AST_NODE_FOR_IN_STATEMENT: {
+            const ecsvm_ecsbin_ast_node_t *identifier_node;
+            const ecsvm_ecsbin_ast_node_t *type_node;
+            const ecsvm_ecsbin_ast_node_t *body_node;
+            ecsvm_component_id_t component_id;
+            size_t index;
+
+            identifier_node = node->first_child == 0u ? NULL : &frame->ast.nodes[node->first_child];
+            type_node = (identifier_node != NULL && identifier_node->next_sibling != 0u)
+                ? &frame->ast.nodes[identifier_node->next_sibling]
+                : NULL;
+            body_node = (type_node != NULL && type_node->next_sibling != 0u)
+                ? &frame->ast.nodes[type_node->next_sibling]
+                : NULL;
+            if (identifier_node == NULL ||
+                identifier_node->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
+                type_node == NULL ||
+                type_node->kind != ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION ||
+                type_node->value_kind != ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID ||
+                body_node == NULL ||
+                !ecsvm_managed_component_type(
+                    frame->runtime,
+                    type_node->value,
+                    NULL,
+                    &component_id
+                )) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            for (index = 0u; index < ecsvm_entity_count(frame->runtime->engine) && !frame->has_return; ++index) {
+                ecsvm_entity_t entity;
+                ecsvm_managed_value_t value;
+                ecsvm_status_t status;
+
+                entity = ecsvm_entity_at(frame->runtime->engine, index);
+                if (entity == ECSVM_INVALID_ENTITY ||
+                    !ecsvm_component_has(frame->runtime->engine, component_id, entity)) {
+                    continue;
+                }
+
+                memset(&value, 0, sizeof(value));
+                value.kind = ECSVM_MANAGED_VALUE_NUMBER;
+                value.number_value = (double)entity;
+                if (!ecsvm_managed_frame_set_local(frame, identifier_node->value, value)) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+
+                status = ecsvm_managed_execute_statement(
+                    frame,
+                    identifier_node->next_sibling == 0u
+                        ? 0u
+                        : type_node->next_sibling
+                );
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+            }
+
             return ECSVM_OK;
         }
         default:

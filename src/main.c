@@ -289,7 +289,6 @@ static int run_self_test(void)
     ecsvm_system_desc_t gravity_desc;
     ecsvm_system_desc_t integrate_desc;
     ecsvm_engine_t *engine;
-    ecsvm_hierarchy_component_t hierarchy;
     vec3_t position;
     vec3_t velocity;
     ecsvm_entity_t entity;
@@ -376,11 +375,6 @@ static int run_self_test(void)
     velocity.y = 10.0f;
     velocity.z = 0.0f;
 
-    hierarchy.parent = ECSVM_INVALID_ENTITY;
-    hierarchy.first_child = ECSVM_INVALID_ENTITY;
-    hierarchy.next_sibling = ECSVM_INVALID_ENTITY;
-    hierarchy.prev_sibling = ECSVM_INVALID_ENTITY;
-
     status = ecsvm_component_set(engine, g_demo_components.position, entity, &position);
     if (status != ECSVM_OK) {
         fprintf(stderr, "failed to attach position: %s\n", ecsvm_status_string(status));
@@ -395,14 +389,8 @@ static int run_self_test(void)
         return 1;
     }
 
-    status = ecsvm_component_set(
-        engine,
-        g_demo_components.core.hierarchy,
-        entity,
-        &hierarchy
-    );
-    if (status != ECSVM_OK) {
-        fprintf(stderr, "failed to attach hierarchy: %s\n", ecsvm_status_string(status));
+    if (!ecsvm_component_has(engine, g_demo_components.core.hierarchy, entity)) {
+        fprintf(stderr, "failed to auto-attach hierarchy\n");
         ecsvm_engine_destroy(engine);
         return 1;
     }

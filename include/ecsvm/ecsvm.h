@@ -73,7 +73,6 @@ typedef struct ecsvm_hierarchy_component {
     ecsvm_entity_t parent;
     ecsvm_entity_t first_child;
     ecsvm_entity_t next_sibling;
-    ecsvm_entity_t prev_sibling;
 } ecsvm_hierarchy_component_t;
 
 struct ecsvm_context {

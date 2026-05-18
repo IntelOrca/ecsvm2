@@ -57,6 +57,77 @@ static bool renderer_draw_rectangle(
     return SDL_RenderGeometry(renderer, NULL, vertices, 4, indices, 6);
 }
 
+static void renderer_compose_transform(
+    const ecsvm_transform_component_t *parent,
+    const ecsvm_transform_component_t *local,
+    ecsvm_transform_component_t *out_transform
+)
+{
+    const float sine = sinf(parent->rotation);
+    const float cosine = cosf(parent->rotation);
+    const float scaled_x = local->position.x * parent->scale.x;
+    const float scaled_y = local->position.y * parent->scale.y;
+
+    out_transform->position.x = parent->position.x + (scaled_x * cosine) - (scaled_y * sine);
+    out_transform->position.y = parent->position.y + (scaled_x * sine) + (scaled_y * cosine);
+    out_transform->scale.x = parent->scale.x * local->scale.x;
+    out_transform->scale.y = parent->scale.y * local->scale.y;
+    out_transform->rotation = parent->rotation + local->rotation;
+}
+
+static bool renderer_resolve_transform(
+    const ecsvm_engine_t *engine,
+    const ecsvm_renderer_config_t *config,
+    ecsvm_entity_t entity,
+    size_t depth_limit,
+    ecsvm_transform_component_t *out_transform
+)
+{
+    const ecsvm_transform_component_t *local_transform;
+    const ecsvm_hierarchy_component_t *hierarchy;
+
+    local_transform = (const ecsvm_transform_component_t *)ecsvm_component_get(
+        engine,
+        config->components.transform,
+        entity
+    );
+    if (local_transform == NULL || out_transform == NULL) {
+        return false;
+    }
+
+    *out_transform = *local_transform;
+    if (config->components.hierarchy == ECSVM_INVALID_COMPONENT || depth_limit == 0u) {
+        return true;
+    }
+
+    hierarchy = (const ecsvm_hierarchy_component_t *)ecsvm_component_get(
+        engine,
+        config->components.hierarchy,
+        entity
+    );
+    if (hierarchy == NULL || hierarchy->parent == ECSVM_INVALID_ENTITY) {
+        return true;
+    }
+
+    {
+        ecsvm_transform_component_t parent_transform;
+
+        if (!renderer_resolve_transform(
+                engine,
+                config,
+                hierarchy->parent,
+                depth_limit - 1u,
+                &parent_transform
+            )) {
+            return true;
+        }
+
+        renderer_compose_transform(&parent_transform, local_transform, out_transform);
+    }
+
+    return true;
+}
+
 static ecsvm_status_t ecsvm_renderer_system_tick(ecsvm_context_t *ctx)
 {
     ecsvm_renderer_system_t *system;
@@ -91,26 +162,28 @@ static ecsvm_status_t ecsvm_renderer_system_tick(ecsvm_context_t *ctx)
 
     for (index = 0u; index < ecsvm_entity_count(ctx->engine); ++index) {
         ecsvm_entity_t entity;
-        const ecsvm_transform_component_t *transform;
+        ecsvm_transform_component_t transform;
         const ecsvm_graphics_shape_component_t *shape;
 
         entity = ecsvm_entity_at(ctx->engine, index);
-        transform = (const ecsvm_transform_component_t *)ecsvm_component_get(
-            ctx->engine,
-            system->config.components.transform,
-            entity
-        );
         shape = (const ecsvm_graphics_shape_component_t *)ecsvm_component_get(
             ctx->engine,
             system->config.components.graphics_shape,
             entity
         );
-        if (transform == NULL || shape == NULL) {
+        if (shape == NULL ||
+            !renderer_resolve_transform(
+                ctx->engine,
+                &system->config,
+                entity,
+                ecsvm_entity_count(ctx->engine),
+                &transform
+            )) {
             continue;
         }
 
         if (shape->kind == ECSVM_SHAPE_RECTANGLE &&
-            !renderer_draw_rectangle(renderer, transform, shape)) {
+            !renderer_draw_rectangle(renderer, &transform, shape)) {
             renderer_log_error(ctx, "SDL_RenderGeometry failed");
             return ECSVM_ERROR_CALLBACK;
         }

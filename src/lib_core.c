@@ -314,9 +314,7 @@ static ecsvm_status_t ecsvm_core_get_first_entity(
 ecsvm_native_function_fn ecsvm_core_find_native_function(const char *qualified_name)
 {
     static const ecsvm_native_binding_t bindings[] = {
-        { "core.Print", ecsvm_core_print },
         { "core.print", ecsvm_core_print },
-        { "core.Stop", ecsvm_core_stop },
         { "core.stop", ecsvm_core_stop },
         { "core.spawn", ecsvm_core_spawn },
         { "core.getFirstEntity", ecsvm_core_get_first_entity },

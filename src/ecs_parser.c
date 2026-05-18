@@ -156,6 +156,25 @@ static int ecsvm_parser_parse_identifier(
     return 1;
 }
 
+static int ecsvm_parser_current_identifier_is(
+    const ecsvm_parser_t *parser,
+    const char *text
+)
+{
+    const ecsvm_token_t *token;
+    size_t length;
+
+    if (parser == NULL || parser->file == NULL || text == NULL) {
+        return 0;
+    }
+
+    token = ecsvm_parser_current(parser);
+    length = strlen(text);
+    return token->kind == ECSVM_TOKEN_IDENTIFIER &&
+        token->length == length &&
+        memcmp(parser->file->source + token->offset, text, length) == 0;
+}
+
 static int ecsvm_parser_parse_identifier_node(
     ecsvm_parser_t *parser,
     ecsvm_syntax_node_array_t *nodes,
@@ -1298,6 +1317,80 @@ static int ecsvm_parser_parse_if_statement(
     return 1;
 }
 
+static int ecsvm_parser_parse_for_in_statement(
+    ecsvm_parser_t *parser,
+    ecsvm_syntax_node_array_t *nodes,
+    size_t token_start,
+    size_t *out_node_index,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    size_t for_index;
+    size_t identifier_index;
+    size_t type_index;
+    size_t body_index;
+
+    if (!ecsvm_parser_push_node(
+            nodes,
+            ECSVM_SYNTAX_FOR_IN_STATEMENT,
+            token_start,
+            &for_index,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_LPAREN, error_message, error_message_capacity) ||
+        !ecsvm_parser_parse_identifier_node(
+            parser,
+            nodes,
+            &nodes->items[for_index].name_start,
+            &nodes->items[for_index].name_end,
+            &identifier_index,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_KEY_IN, error_message, error_message_capacity)) {
+        return 0;
+    }
+
+    if (!ecsvm_parser_current_identifier_is(parser, "getEntities")) {
+        ecsvm_set_error(error_message, error_message_capacity, "expected getEntities");
+        return 0;
+    }
+    parser->index += 1u;
+
+    if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_LPAREN, error_message, error_message_capacity) ||
+        !ecsvm_parser_parse_type_expression(
+            parser,
+            nodes,
+            &nodes->items[for_index].type_start,
+            &nodes->items[for_index].type_end,
+            &type_index,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_RPAREN, error_message, error_message_capacity) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_RPAREN, error_message, error_message_capacity) ||
+        !ecsvm_parser_parse_statement(
+            parser,
+            nodes,
+            &body_index,
+            error_message,
+            error_message_capacity
+        )) {
+        return 0;
+    }
+
+    ecsvm_syntax_node_add_child(nodes, for_index, identifier_index);
+    ecsvm_syntax_node_add_child(nodes, for_index, type_index);
+    ecsvm_syntax_node_add_child(nodes, for_index, body_index);
+    nodes->items[for_index].body_start = nodes->items[body_index].token_start;
+    nodes->items[for_index].body_end = nodes->items[body_index].token_end;
+    nodes->items[for_index].token_end = nodes->items[body_index].token_end;
+    *out_node_index = for_index;
+    return 1;
+}
+
 static int ecsvm_parser_parse_expression_statement(
     ecsvm_parser_t *parser,
     ecsvm_syntax_node_array_t *nodes,
@@ -1356,6 +1449,17 @@ static int ecsvm_parser_parse_statement(
 
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_IF)) {
         return ecsvm_parser_parse_if_statement(
+            parser,
+            nodes,
+            parser->index - 1u,
+            out_node_index,
+            error_message,
+            error_message_capacity
+        );
+    }
+
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_FOR)) {
+        return ecsvm_parser_parse_for_in_statement(
             parser,
             nodes,
             parser->index - 1u,

@@ -18,12 +18,12 @@ namespace app {
     }
 
     system SayHello() {
-        core.Print(message());
-        core.Print(mathStatus());
+        core.print(message());
+        core.print(mathStatus());
     }
 
     system Halt() {
-        core.Print("stopping");
-        core.Stop();
+        core.print("stopping");
+        core.stop();
     }
 }

@@ -37,6 +37,8 @@ static const char *ecsvm_ecs_tree_syntax_kind_string(ecsvm_syntax_kind_t kind)
         return "return_statement";
     case ECSVM_SYNTAX_IF_STATEMENT:
         return "if_statement";
+    case ECSVM_SYNTAX_FOR_IN_STATEMENT:
+        return "for_in_statement";
     case ECSVM_SYNTAX_ELSE_CLAUSE:
         return "else_clause";
     case ECSVM_SYNTAX_EXPRESSION_STATEMENT:
@@ -139,6 +141,10 @@ static const char *ecsvm_ecs_tree_token_kind_string(ecsvm_token_kind_t kind)
         return "keyword_fn";
     case ECSVM_TOKEN_KEY_IF:
         return "keyword_if";
+    case ECSVM_TOKEN_KEY_FOR:
+        return "keyword_for";
+    case ECSVM_TOKEN_KEY_IN:
+        return "keyword_in";
     case ECSVM_TOKEN_KEY_ELSE:
         return "keyword_else";
     case ECSVM_TOKEN_KEY_LET:

@@ -686,13 +686,13 @@ ecsvm_status_t ecsvm_engine_register_builtin_components(ecsvm_engine_t *engine)
         return ECSVM_OK;
     }
 
-    existing = ecsvm_find_component_index_by_name(engine, "core.hierarchy");
+    existing = ecsvm_find_component_index_by_name(engine, "core.Hierarchy");
     if (existing >= 0) {
         engine->hierarchy_component = (ecsvm_component_id_t)((size_t)existing + 1u);
         return ECSVM_OK;
     }
 
-    desc.name = "core.hierarchy";
+    desc.name = "core.Hierarchy";
     desc.size = sizeof(ecsvm_hierarchy_component_t);
     desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
 
@@ -920,8 +920,14 @@ ecsvm_entity_t ecsvm_entity_create(ecsvm_engine_t *engine)
 {
     ecsvm_status_t status;
     ecsvm_entity_t entity;
+    ecsvm_hierarchy_component_t hierarchy;
 
     if (engine == NULL) {
+        return ECSVM_INVALID_ENTITY;
+    }
+
+    status = ecsvm_engine_register_builtin_components(engine);
+    if (status != ECSVM_OK) {
         return ECSVM_INVALID_ENTITY;
     }
 
@@ -934,6 +940,17 @@ ecsvm_entity_t ecsvm_entity_create(ecsvm_engine_t *engine)
     engine->next_entity_id += 1u;
     engine->entities[engine->entity_count] = entity;
     engine->entity_count += 1u;
+
+    hierarchy.parent = ECSVM_INVALID_ENTITY;
+    hierarchy.first_child = ECSVM_INVALID_ENTITY;
+    hierarchy.next_sibling = ECSVM_INVALID_ENTITY;
+    status = ecsvm_component_set(engine, engine->hierarchy_component, entity, &hierarchy);
+    if (status != ECSVM_OK) {
+        engine->entity_count -= 1u;
+        engine->next_entity_id -= 1u;
+        return ECSVM_INVALID_ENTITY;
+    }
+
     return entity;
 }
 

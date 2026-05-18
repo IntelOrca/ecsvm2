@@ -41,6 +41,12 @@ static ecsvm_token_kind_t ecsvm_keyword_kind(const char *text, size_t length)
     if (length == 2u && memcmp(text, "if", 2u) == 0) {
         return ECSVM_TOKEN_KEY_IF;
     }
+    if (length == 3u && memcmp(text, "for", 3u) == 0) {
+        return ECSVM_TOKEN_KEY_FOR;
+    }
+    if (length == 2u && memcmp(text, "in", 2u) == 0) {
+        return ECSVM_TOKEN_KEY_IN;
+    }
     if (length == 4u && memcmp(text, "else", 4u) == 0) {
         return ECSVM_TOKEN_KEY_ELSE;
     }

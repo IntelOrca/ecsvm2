@@ -27,6 +27,12 @@ namespace core {
         last_tick_duration_ns: u64;
     }
 
+    component Hierarchy {
+        parent: entity;
+        first_child: entity;
+        next_sibling: entity;
+    }
+
     namespace graphics {
         /**
          * Renders a geometric shape for an entity.

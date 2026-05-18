@@ -231,10 +231,9 @@ namespace pong {
     [Before(core.Window)]
     [Before(core.Renderer)]
     system MoveBall {
-        let game_state_entity: entity = getFirstEntity<GameState>();
         let tick_state_entity: entity = getFirstEntity<TickState>();
 
-        if (game_state_entity == null || tick_state_entity == null) {
+        if (tick_state_entity == null) {
             return;
         }
 
@@ -247,13 +246,14 @@ namespace pong {
             print("pong.move-ball");
         }
 
-        let game_state: GameState = game_state_entity[GameState];
-        let ball: Transform = game_state.ball[Transform];
-        let velocity: Velocity = game_state.ball[Velocity];
+        for (ball_entity in getEntities(Velocity)) {
+            let ball: Transform = ball_entity[Transform];
+            let velocity: Velocity = ball_entity[Velocity];
 
-        ball.position.x = ball.position.x + (velocity.value.x * tick.delta_seconds);
-        ball.position.y = ball.position.y + (velocity.value.y * tick.delta_seconds);
-        ball.rotation = ball.rotation + (2.5 * tick.delta_seconds);
+            ball.position.x = ball.position.x + (velocity.value.x * tick.delta_seconds);
+            ball.position.y = ball.position.y + (velocity.value.y * tick.delta_seconds);
+            ball.rotation = ball.rotation + (2.5 * tick.delta_seconds);
+        }
     }
 
     [After(pong.MoveBall)]

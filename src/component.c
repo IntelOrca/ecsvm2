@@ -24,7 +24,7 @@ ecsvm_status_t ecsvm_register_core_components(
 
     components.hierarchy = ecsvm_engine_hierarchy_component(engine);
 
-    desc.name = "core.transform";
+    desc.name = "core.Transform";
     desc.size = sizeof(ecsvm_transform_component_t);
     desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
     status = ecsvm_engine_register_component(engine, &desc, &components.transform);
@@ -32,7 +32,15 @@ ecsvm_status_t ecsvm_register_core_components(
         return status;
     }
 
-    desc.name = "core.graphics.shape";
+    desc.name = "core.Time";
+    desc.size = sizeof(ecsvm_time_component_t);
+    desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
+    status = ecsvm_engine_register_component(engine, &desc, &components.time);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    desc.name = "core.graphics.GraphicsShape";
     desc.size = sizeof(ecsvm_graphics_shape_component_t);
     desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
     status = ecsvm_engine_register_component(engine, &desc, &components.graphics_shape);

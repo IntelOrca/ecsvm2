@@ -22,6 +22,11 @@ namespace core {
         rotation: f32;
     }
 
+    component Time {
+        tick_count: u64;
+        last_tick_duration_ns: u64;
+    }
+
     namespace graphics {
         /**
          * Renders a geometric shape for an entity.

@@ -340,9 +340,14 @@ int ecsvm_semantic_function_parameter_push(
 
 int ecsvm_semantic_function_attribute_push(
     ecsvm_semantic_function_t *function,
-    char *attribute_name
+    char *attribute_name,
+    char *attribute_data
 )
 {
+    size_t previous_capacity;
+    char **attribute_data_items;
+
+    previous_capacity = function->attribute_capacity;
     if (!ecsvm_reserve_bytes(
             (void **)&function->attributes,
             sizeof(*function->attributes),
@@ -352,7 +357,19 @@ int ecsvm_semantic_function_attribute_push(
         return 0;
     }
 
+    if (function->attribute_capacity != previous_capacity) {
+        attribute_data_items = (char **)realloc(
+            function->attribute_data,
+            function->attribute_capacity * sizeof(*function->attribute_data)
+        );
+        if (attribute_data_items == NULL) {
+            return 0;
+        }
+        function->attribute_data = attribute_data_items;
+    }
+
     function->attributes[function->attribute_count] = attribute_name;
+    function->attribute_data[function->attribute_count] = attribute_data;
     function->attribute_count += 1u;
     return 1;
 }
@@ -404,9 +421,11 @@ void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function)
     }
     for (index = 0u; index < function->attribute_count; ++index) {
         free(function->attributes[index]);
+        free(function->attribute_data[index]);
     }
     free(function->parameters);
     free(function->attributes);
+    free(function->attribute_data);
     memset(function, 0, sizeof(*function));
 }
 

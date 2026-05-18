@@ -158,6 +158,9 @@ size_t ecsvm_ecsbin_builtin_layout(
     } else if (strcmp(qualified_name, "core.UInt32") == 0) {
         size = sizeof(uint32_t);
         alignment = ECSVM_ALIGNOF(uint32_t);
+    } else if (strcmp(qualified_name, "core.UInt64") == 0) {
+        size = sizeof(uint64_t);
+        alignment = ECSVM_ALIGNOF(uint64_t);
     } else if (strcmp(qualified_name, "core.Float32") == 0) {
         size = sizeof(float);
         alignment = ECSVM_ALIGNOF(float);
@@ -386,6 +389,35 @@ int ecsvm_ecsbin_function_has_attribute(
     }
 
     return 0;
+}
+
+const char *ecsvm_ecsbin_function_attribute_data(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    const char *qualified_name
+)
+{
+    size_t attribute_index;
+
+    if (module == NULL || function_ref == NULL || qualified_name == NULL) {
+        return NULL;
+    }
+
+    /* Function attribute slot 0 stores the return type. */
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref != NULL &&
+            type_ref->qualified_name != NULL &&
+            strcmp(type_ref->qualified_name, qualified_name) == 0) {
+            return attribute != NULL ? attribute->data : NULL;
+        }
+    }
+
+    return NULL;
 }
 
 

@@ -1266,6 +1266,9 @@ static const char *ecsvm_source_builtin_type_name(const char *qualified_name)
     if (strcmp(qualified_name, "core.UInt32") == 0) {
         return "u32";
     }
+    if (strcmp(qualified_name, "core.UInt64") == 0) {
+        return "u64";
+    }
     if (strcmp(qualified_name, "core.Float32") == 0) {
         return "f32";
     }
@@ -1465,6 +1468,7 @@ static ecsvm_status_t ecsvm_append_decompiled_function(
 {
     const ecsvm_ecsbin_function_ref_t *function_ref;
     const ecsvm_ecsbin_type_ref_t *return_type;
+    size_t attribute_index;
     size_t parameter_index;
     int is_system;
 
@@ -1474,6 +1478,43 @@ static ecsvm_status_t ecsvm_append_decompiled_function(
     if (return_type == NULL) {
         ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function return type is invalid");
         return ECSVM_ERROR_ARGUMENT;
+    }
+
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *attribute_type;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        attribute_type = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (attribute_type == NULL) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function attribute is invalid");
+            return ECSVM_ERROR_ARGUMENT;
+        }
+        if (strcmp(attribute_type->qualified_name, "core.System") == 0) {
+            continue;
+        }
+        if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||
+            !ecsvm_ecsbin_text_buffer_append_char(buffer, '[') ||
+            !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(attribute_type, current_namespace))) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+            return ECSVM_ERROR_MEMORY;
+        }
+        if (attribute->data != NULL && attribute->data[0] != '\0') {
+            const int use_type_parameter =
+                strcmp(attribute_type->qualified_name, "core.Before") == 0 ||
+                strcmp(attribute_type->qualified_name, "core.After") == 0;
+
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, use_type_parameter ? '<' : '(') ||
+                !ecsvm_ecsbin_text_buffer_append(buffer, attribute->data) ||
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, use_type_parameter ? '>' : ')')) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+                return ECSVM_ERROR_MEMORY;
+            }
+        }
+        if (!ecsvm_ecsbin_text_buffer_append(buffer, "]\n")) {
+            ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+            return ECSVM_ERROR_MEMORY;
+        }
     }
 
     if (!ecsvm_ecsbin_text_buffer_append(buffer, indent) ||

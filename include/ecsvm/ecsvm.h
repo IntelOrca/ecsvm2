@@ -63,6 +63,10 @@ typedef struct ecsvm_system_desc {
     ecsvm_free_fn free;
     ecsvm_log_fn log;
     void *user_data;
+    const char *const *before;
+    size_t before_count;
+    const char *const *after;
+    size_t after_count;
 } ecsvm_system_desc_t;
 
 typedef struct ecsvm_hierarchy_component {

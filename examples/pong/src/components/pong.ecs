@@ -1,18 +1,22 @@
 namespace pong {
-    component Paddle {
-        speed: f32;
-        up_key: i32;
-        down_key: i32;
-    }
-
     component Velocity {
         value: core.vec2;
     }
 
     component GameState {
-        initialized: bool;
+        left_paddle: entity;
+        right_paddle: entity;
+        ball: entity;
         left_score: i32;
         right_score: i32;
         serve_direction: f32;
+    }
+
+    component TickState {
+        should_update: bool;
+        accumulator_ns: u64;
+        total_elapsed_ns: u64;
+        update_count: u64;
+        delta_seconds: f32;
     }
 }

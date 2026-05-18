@@ -14,12 +14,6 @@ typedef struct ecsvm_component_store {
     size_t capacity;
 } ecsvm_component_store_t;
 
-typedef struct ecsvm_system_entry {
-    char *name;
-    ecsvm_system_fn callback;
-    ecsvm_system_api_t api;
-} ecsvm_system_entry_t;
-
 typedef struct ecsvm_blob_slot {
     unsigned char *data;
     size_t size;
@@ -40,6 +34,9 @@ struct ecsvm_engine {
     ecsvm_system_entry_t *systems;
     size_t system_count;
     size_t system_capacity;
+    size_t *system_pipeline;
+    size_t system_pipeline_count;
+    int pipeline_dirty;
 
     ecsvm_function_entry_t *functions;
     size_t function_count;
@@ -102,6 +99,78 @@ static char *ecsvm_copy_string(const char *text)
 
     memcpy(copy, text, length + 1u);
     return copy;
+}
+
+static void ecsvm_free_string_array(char **items, size_t count)
+{
+    size_t index;
+
+    if (items == NULL) {
+        return;
+    }
+
+    for (index = 0u; index < count; ++index) {
+        free(items[index]);
+    }
+    free(items);
+}
+
+static char **ecsvm_copy_string_array(
+    const char *const *items,
+    size_t count
+)
+{
+    char **copies;
+    size_t index;
+
+    if (count == 0u) {
+        return NULL;
+    }
+    if (items == NULL) {
+        return NULL;
+    }
+
+    copies = (char **)calloc(count, sizeof(*copies));
+    if (copies == NULL) {
+        return NULL;
+    }
+
+    for (index = 0u; index < count; ++index) {
+        copies[index] = ecsvm_copy_string(items[index]);
+        if (copies[index] == NULL) {
+            ecsvm_free_string_array(copies, count);
+            return NULL;
+        }
+    }
+
+    return copies;
+}
+
+static ecsvm_status_t ecsvm_engine_ensure_pipeline(ecsvm_engine_t *engine)
+{
+    size_t *order;
+    size_t count;
+    ecsvm_status_t status;
+
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+    if (!engine->pipeline_dirty) {
+        return ECSVM_OK;
+    }
+
+    order = NULL;
+    count = 0u;
+    status = ecsvm_pipeline_build(engine->systems, engine->system_count, &order, &count);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    free(engine->system_pipeline);
+    engine->system_pipeline = order;
+    engine->system_pipeline_count = count;
+    engine->pipeline_dirty = 0;
+    return ECSVM_OK;
 }
 
 static int ecsvm_has_entity(const ecsvm_engine_t *engine, ecsvm_entity_t entity)
@@ -505,6 +574,8 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine)
 
     for (index = 0u; index < engine->system_count; ++index) {
         free(engine->systems[index].name);
+        ecsvm_free_string_array(engine->systems[index].before, engine->systems[index].before_count);
+        ecsvm_free_string_array(engine->systems[index].after, engine->systems[index].after_count);
     }
 
     for (index = 0u; index < engine->blob_count; ++index) {
@@ -515,6 +586,7 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine)
     free(engine->entities);
     free(engine->components);
     free(engine->systems);
+    free(engine->system_pipeline);
     free(engine->blobs);
     free(engine);
 }
@@ -708,7 +780,13 @@ ecsvm_status_t ecsvm_engine_register_system(
     char *name;
     ecsvm_status_t status;
 
-    if (engine == NULL || desc == NULL || desc->name == NULL || desc->name[0] == '\0' || desc->callback == NULL) {
+    if (engine == NULL ||
+        desc == NULL ||
+        desc->name == NULL ||
+        desc->name[0] == '\0' ||
+        desc->callback == NULL ||
+        (desc->before_count > 0u && desc->before == NULL) ||
+        (desc->after_count > 0u && desc->after == NULL)) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
@@ -734,7 +812,20 @@ ecsvm_status_t ecsvm_engine_register_system(
     entry->api.free = desc->free != NULL ? desc->free : ecsvm_default_free;
     entry->api.log = desc->log != NULL ? desc->log : ecsvm_default_log;
     entry->api.userdata = desc->user_data;
+    entry->before = ecsvm_copy_string_array(desc->before, desc->before_count);
+    entry->before_count = desc->before_count;
+    entry->after = ecsvm_copy_string_array(desc->after, desc->after_count);
+    entry->after_count = desc->after_count;
+    if ((desc->before_count > 0u && entry->before == NULL) ||
+        (desc->after_count > 0u && entry->after == NULL)) {
+        ecsvm_free_string_array(entry->before, entry->before_count);
+        ecsvm_free_string_array(entry->after, entry->after_count);
+        free(entry->name);
+        memset(entry, 0, sizeof(*entry));
+        return ECSVM_ERROR_MEMORY;
+    }
     engine->system_count += 1u;
+    engine->pipeline_dirty = 1;
 
     if (out_system_index != NULL) {
         *out_system_index = engine->system_count - 1u;
@@ -756,12 +847,20 @@ ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine)
     memset(&context, 0, sizeof(context));
     context.engine = engine;
 
-    for (index = 0u; index < engine->system_count; ++index) {
-        context.system_index = index;
-        context.system_name = engine->systems[index].name;
-        context.api = engine->systems[index].api;
+    status = ecsvm_engine_ensure_pipeline(engine);
+    if (status != ECSVM_OK) {
+        return status;
+    }
 
-        status = engine->systems[index].callback(&context);
+    for (index = 0u; index < engine->system_pipeline_count; ++index) {
+        size_t system_index;
+
+        system_index = engine->system_pipeline[index];
+        context.system_index = index;
+        context.system_name = engine->systems[system_index].name;
+        context.api = engine->systems[system_index].api;
+
+        status = engine->systems[system_index].callback(&context);
         if (status != ECSVM_OK) {
             return status == ECSVM_OK ? ECSVM_ERROR_CALLBACK : status;
         }

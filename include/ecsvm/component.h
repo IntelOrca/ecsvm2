@@ -32,9 +32,15 @@ typedef struct ecsvm_graphics_shape_component {
     int32_t kind;
 } ecsvm_graphics_shape_component_t;
 
+typedef struct ecsvm_time_component {
+    uint64_t tick_count;
+    uint64_t last_tick_duration_ns;
+} ecsvm_time_component_t;
+
 typedef struct ecsvm_core_components {
     ecsvm_component_id_t hierarchy;
     ecsvm_component_id_t transform;
+    ecsvm_component_id_t time;
     ecsvm_component_id_t graphics_shape;
 } ecsvm_core_components_t;
 

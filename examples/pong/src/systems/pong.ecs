@@ -1,23 +1,6 @@
 import core;
 
 namespace pong {
-    const PONG_WINDOW_WIDTH: i32 = 960;
-    const PONG_WINDOW_HEIGHT: i32 = 540;
-    const PADDLE_SPEED: f32 = 500.0;
-    const BALL_SPEED: f32 = 420.0;
-    const BALL_SPEED_Y_SCALE: f32 = 0.35;
-    const BALL_BOUNCE_Y_SCALE: f32 = 0.75;
-    const PADDLE_HALF_HEIGHT: f32 = 50.0;
-    const PADDLE_WIDTH: f32 = 16.0;
-    const PADDLE_HEIGHT: f32 = 100.0;
-    const BALL_SIZE: f32 = 16.0;
-    const CENTER_PILLAR_WIDTH: f32 = 6.0;
-    const BORDER_WIDTH: f32 = 8.0;
-    const LEFT_PADDLE_X: f32 = 40.0;
-    const RIGHT_PADDLE_X: f32 = 40.0;
-    const BALL_ROTATION_SPEED: f32 = 2.5;
-    const KEYBOARD_KIND: i32 = 1;
-
     fn clamp(value: f32, minimum: f32, maximum: f32): f32 {
         if (value < minimum) {
             return minimum;
@@ -28,6 +11,18 @@ namespace pong {
         }
 
         return value;
+    }
+
+    fn move_towards(current: f32, target: f32, step: f32): f32 {
+        if (current < target - step) {
+            return current + step;
+        }
+
+        if (current > target + step) {
+            return current - step;
+        }
+
+        return target;
     }
 
     fn rect_left(transform: Transform): f32 {
@@ -66,254 +61,282 @@ namespace pong {
         return true;
     }
 
-    fn reset_ball(window: Window, ball: Transform, velocity: Velocity, direction: f32) {
-        ball.position.x = window.width * 0.5;
-        ball.position.y = window.height * 0.5;
+    fn reset_ball(ball: Transform, velocity: Velocity, direction: f32) {
+        ball.position.x = 960.0 * 0.5;
+        ball.position.y = 540.0 * 0.5;
         ball.rotation = 0.0;
-        velocity.value.x = BALL_SPEED * direction;
-        velocity.value.y = BALL_SPEED * BALL_SPEED_Y_SCALE;
+        velocity.value.x = 420.0 * direction;
+        velocity.value.y = 420.0 * 0.35;
     }
 
-    fn apply_rect(
-        transform: Transform,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        rotation: f32
-    ): Transform {
-        transform.position.x = x;
-        transform.position.y = y;
-        transform.scale.x = width;
-        transform.scale.y = height;
-        transform.rotation = rotation;
-        return transform;
-    }
-
-    fn apply_rect_shape(
-        shape: GraphicsShape,
-        r: f32,
-        g: f32,
-        b: f32,
-        a: f32
-    ): GraphicsShape {
-        shape.color.x = r;
-        shape.color.y = g;
-        shape.color.z = b;
-        shape.color.w = a;
-        shape.kind = 0;
-        return shape;
-    }
-
-    fn apply_paddle(
-        paddle: Paddle,
-        speed: f32,
-        up_key: i32,
-        down_key: i32
-    ): Paddle {
-        paddle.speed = speed;
-        paddle.up_key = up_key;
-        paddle.down_key = down_key;
-        return paddle;
-    }
-
-    fn apply_velocity(velocity: Velocity, x: f32, y: f32): Velocity {
-        velocity.value.x = x;
-        velocity.value.y = y;
-        return velocity;
-    }
-
+    [After<core.time>]
+    [Before<core.window>]
+    [Before<core.renderer>]
     system Bootstrap {
-        if (getFirstEntity<GameState>() == null) {
-            let game_state: entity = spawn();
-            let left_wall: entity = spawn();
-            let center_line: entity = spawn();
-            let left_paddle: entity = spawn();
-            let right_paddle: entity = spawn();
-            let ball: entity = spawn();
-            let left_up_monitor: entity = spawn();
-            let left_down_monitor: entity = spawn();
-            let right_up_monitor: entity = spawn();
-            let right_down_monitor: entity = spawn();
-
-            game_state[GameState].initialized = true;
-            game_state[GameState].left_score = 0;
-            game_state[GameState].right_score = 0;
-            game_state[GameState].serve_direction = 1.0;
-
-            left_wall[Transform].position.x = 30.0;
-            left_wall[Transform].position.y = PONG_WINDOW_HEIGHT * 0.5;
-            left_wall[Transform].scale.x = BORDER_WIDTH;
-            left_wall[Transform].scale.y = PONG_WINDOW_HEIGHT * 1.0;
-            left_wall[Transform].rotation = 0.0;
-            left_wall[GraphicsShape].color.x = 0.2;
-            left_wall[GraphicsShape].color.y = 0.2;
-            left_wall[GraphicsShape].color.z = 0.2;
-            left_wall[GraphicsShape].color.w = 1.0;
-            left_wall[GraphicsShape].kind = 0;
-
-            center_line[Transform].position.x = PONG_WINDOW_WIDTH * 0.5;
-            center_line[Transform].position.y = PONG_WINDOW_HEIGHT * 0.5;
-            center_line[Transform].scale.x = CENTER_PILLAR_WIDTH;
-            center_line[Transform].scale.y = 18.0;
-            center_line[Transform].rotation = 0.0;
-            center_line[GraphicsShape].color.x = 1.0;
-            center_line[GraphicsShape].color.y = 1.0;
-            center_line[GraphicsShape].color.z = 1.0;
-            center_line[GraphicsShape].color.w = 0.65;
-            center_line[GraphicsShape].kind = 0;
-
-            left_paddle[Transform].position.x = LEFT_PADDLE_X;
-            left_paddle[Transform].position.y = PONG_WINDOW_HEIGHT * 0.5;
-            left_paddle[Transform].scale.x = PADDLE_WIDTH;
-            left_paddle[Transform].scale.y = PADDLE_HEIGHT;
-            left_paddle[Transform].rotation = 0.0;
-            left_paddle[GraphicsShape].color.x = 1.0;
-            left_paddle[GraphicsShape].color.y = 1.0;
-            left_paddle[GraphicsShape].color.z = 1.0;
-            left_paddle[GraphicsShape].color.w = 1.0;
-            left_paddle[GraphicsShape].kind = 0;
-            left_paddle[Paddle].speed = PADDLE_SPEED;
-            left_paddle[Paddle].up_key = 0;
-            left_paddle[Paddle].down_key = 1;
-
-            right_paddle[Transform].position.x = PONG_WINDOW_WIDTH - RIGHT_PADDLE_X;
-            right_paddle[Transform].position.y = PONG_WINDOW_HEIGHT * 0.5;
-            right_paddle[Transform].scale.x = PADDLE_WIDTH;
-            right_paddle[Transform].scale.y = PADDLE_HEIGHT;
-            right_paddle[Transform].rotation = 0.0;
-            right_paddle[GraphicsShape].color.x = 1.0;
-            right_paddle[GraphicsShape].color.y = 1.0;
-            right_paddle[GraphicsShape].color.z = 1.0;
-            right_paddle[GraphicsShape].color.w = 1.0;
-            right_paddle[GraphicsShape].kind = 0;
-            right_paddle[Paddle].speed = PADDLE_SPEED;
-            right_paddle[Paddle].up_key = 2;
-            right_paddle[Paddle].down_key = 3;
-
-            ball[Transform].position.x = PONG_WINDOW_WIDTH * 0.5;
-            ball[Transform].position.y = PONG_WINDOW_HEIGHT * 0.5;
-            ball[Transform].scale.x = BALL_SIZE;
-            ball[Transform].scale.y = BALL_SIZE;
-            ball[Transform].rotation = 0.0;
-            ball[GraphicsShape].color.x = 1.0;
-            ball[GraphicsShape].color.y = 0.85;
-            ball[GraphicsShape].color.z = 0.2;
-            ball[GraphicsShape].color.w = 1.0;
-            ball[GraphicsShape].kind = 0;
-            ball[Velocity].value.x = BALL_SPEED;
-            ball[Velocity].value.y = BALL_SPEED * BALL_SPEED_Y_SCALE;
-
-            left_up_monitor[input.InputMonitor].kind = KEYBOARD_KIND;
-            left_up_monitor[input.InputMonitor].device = 0;
-            left_up_monitor[input.InputMonitor].index = 0;
-            left_up_monitor[input.InputMonitor].value = 0.0;
-            left_down_monitor[input.InputMonitor].kind = KEYBOARD_KIND;
-            left_down_monitor[input.InputMonitor].device = 0;
-            left_down_monitor[input.InputMonitor].index = 1;
-            left_down_monitor[input.InputMonitor].value = 0.0;
-            right_up_monitor[input.InputMonitor].kind = KEYBOARD_KIND;
-            right_up_monitor[input.InputMonitor].device = 0;
-            right_up_monitor[input.InputMonitor].index = 2;
-            right_up_monitor[input.InputMonitor].value = 0.0;
-            right_down_monitor[input.InputMonitor].kind = KEYBOARD_KIND;
-            right_down_monitor[input.InputMonitor].device = 0;
-            right_down_monitor[input.InputMonitor].index = 3;
-            right_down_monitor[input.InputMonitor].value = 0.0;
-        }
-    }
-
-    system SyncWindow(window_entity: Entity) {
-        let window: Window = window_entity[Window];
-        window.width = PONG_WINDOW_WIDTH;
-        window.height = PONG_WINDOW_HEIGHT;
-        window.delta_seconds = 1.0 / 60.0;
-        window.should_close = false;
-    }
-
-    system TrackInput(input_entity: Entity) {
-        let input: input.InputMonitor = input_entity[input.InputMonitor];
-        if (input.kind == KEYBOARD_KIND) {
-            if (input.index == 0) {
-                input.value = 0.0;
-            } else if (input.index == 1) {
-                input.value = 0.0;
-            } else if (input.index == 2) {
-                input.value = 0.0;
-            } else if (input.index == 3) {
-                input.value = 0.0;
-            }
-        }
-    }
-
-    system MovePaddles(paddle_entity: Entity) {
-        let paddle: Paddle = paddle_entity[Paddle];
-        let transform: Transform = paddle_entity[Transform];
-        let window: Window = getFirstComponent<Window>();
-        let input: input.InputMonitor = getFirstComponent<input.InputMonitor>();
-        let movement: f32 = 0.0;
-
-        if (input.kind == KEYBOARD_KIND && input.index == paddle.up_key && input.value > 0.0) {
-            movement = movement - (paddle.speed * window.delta_seconds);
-        }
-
-        if (input.kind == KEYBOARD_KIND && input.index == paddle.down_key && input.value > 0.0) {
-            movement = movement + (paddle.speed * window.delta_seconds);
-        }
-
-        transform.position.y = clamp(
-            transform.position.y + movement,
-            PADDLE_HALF_HEIGHT,
-            window.height - PADDLE_HALF_HEIGHT
-        );
-    }
-
-    system MoveBall(ball_entity: Entity) {
-        let transform: Transform = ball_entity[Transform];
-        let velocity: Velocity = ball_entity[Velocity];
-        let window: Window = getFirstComponent<Window>();
-        transform.position.x = transform.position.x + (velocity.value.x * window.delta_seconds);
-        transform.position.y = transform.position.y + (velocity.value.y * window.delta_seconds);
-        transform.rotation = transform.rotation + (window.delta_seconds * BALL_ROTATION_SPEED);
-
-        if (rect_top(transform) <= 0.0) {
-            transform.position.y = transform.scale.y * 0.5;
-            velocity.value.y = 0.0 - velocity.value.y;
-        } else if (rect_bottom(transform) >= window.height) {
-            transform.position.y = window.height - (transform.scale.y * 0.5);
-            velocity.value.y = 0.0 - velocity.value.y;
-        }
-    }
-
-    system ResolvePaddleHits(ball_entity: Entity) {
-        let ball: Transform = ball_entity[Transform];
-        let velocity: Velocity = ball_entity[Velocity];
-        let paddle: Transform = getFirstComponent<Transform>();
-        if (!overlaps(ball, paddle)) {
+        if (getFirstEntity<GameState>() != null) {
             return;
         }
 
-        let offset: f32 = (ball.position.y - paddle.position.y) / (paddle.scale.y * 0.5);
+        let game_state_entity: entity = spawn();
+        let tick_state_entity: entity = spawn();
+        let left_paddle: entity = spawn();
+        let right_paddle: entity = spawn();
+        let ball: entity = spawn();
+        let center_line: entity = spawn();
 
-        if (ball.position.x < paddle.position.x) {
-            ball.position.x = paddle.position.x - (paddle.scale.x * 0.5) - (ball.scale.x * 0.5);
-            velocity.value.x = 0.0 - velocity.value.x;
-        } else {
-            ball.position.x = paddle.position.x + (paddle.scale.x * 0.5) + (ball.scale.x * 0.5);
-            velocity.value.x = 0.0 - velocity.value.x;
-        }
+        game_state_entity[GameState].left_paddle = left_paddle;
+        game_state_entity[GameState].right_paddle = right_paddle;
+        game_state_entity[GameState].ball = ball;
+        game_state_entity[GameState].left_score = 0;
+        game_state_entity[GameState].right_score = 0;
+        game_state_entity[GameState].serve_direction = 1.0;
 
-        velocity.value.y = offset * BALL_SPEED * BALL_BOUNCE_Y_SCALE;
+        tick_state_entity[TickState].should_update = false;
+        tick_state_entity[TickState].accumulator_ns = 0;
+        tick_state_entity[TickState].total_elapsed_ns = 0;
+        tick_state_entity[TickState].update_count = 0;
+        tick_state_entity[TickState].delta_seconds = 0.0;
+
+        left_paddle[Transform].position.x = 40.0;
+        left_paddle[Transform].position.y = 540.0 * 0.5;
+        left_paddle[Transform].scale.x = 16.0;
+        left_paddle[Transform].scale.y = 100.0;
+        left_paddle[Transform].rotation = 0.0;
+        left_paddle[GraphicsShape].color.x = 1.0;
+        left_paddle[GraphicsShape].color.y = 1.0;
+        left_paddle[GraphicsShape].color.z = 1.0;
+        left_paddle[GraphicsShape].color.w = 1.0;
+        left_paddle[GraphicsShape].kind = 1;
+
+        right_paddle[Transform].position.x = 960.0 - 40.0;
+        right_paddle[Transform].position.y = 540.0 * 0.5;
+        right_paddle[Transform].scale.x = 16.0;
+        right_paddle[Transform].scale.y = 100.0;
+        right_paddle[Transform].rotation = 0.0;
+        right_paddle[GraphicsShape].color.x = 1.0;
+        right_paddle[GraphicsShape].color.y = 1.0;
+        right_paddle[GraphicsShape].color.z = 1.0;
+        right_paddle[GraphicsShape].color.w = 1.0;
+        right_paddle[GraphicsShape].kind = 1;
+
+        ball[Transform].position.x = 960.0 * 0.5;
+        ball[Transform].position.y = 540.0 * 0.5;
+        ball[Transform].scale.x = 16.0;
+        ball[Transform].scale.y = 16.0;
+        ball[Transform].rotation = 0.0;
+        ball[GraphicsShape].color.x = 1.0;
+        ball[GraphicsShape].color.y = 0.85;
+        ball[GraphicsShape].color.z = 0.2;
+        ball[GraphicsShape].color.w = 1.0;
+        ball[GraphicsShape].kind = 1;
+        ball[Velocity].value.x = 420.0;
+        ball[Velocity].value.y = 420.0 * 0.35;
+
+        center_line[Transform].position.x = 960.0 * 0.5;
+        center_line[Transform].position.y = 540.0 * 0.5;
+        center_line[Transform].scale.x = 6.0;
+        center_line[Transform].scale.y = 540.0 * 0.8;
+        center_line[Transform].rotation = 0.0;
+        center_line[GraphicsShape].color.x = 1.0;
+        center_line[GraphicsShape].color.y = 1.0;
+        center_line[GraphicsShape].color.z = 1.0;
+        center_line[GraphicsShape].color.w = 0.15;
+        center_line[GraphicsShape].kind = 1;
+
+        print("pong.bootstrap");
     }
 
-    system ResetScoring(ball_entity: Entity) {
-        let ball: Transform = ball_entity[Transform];
-        let velocity: Velocity = ball_entity[Velocity];
-        let window: Window = getFirstComponent<Window>();
+    [After<core.time>]
+    [After<pong.Bootstrap>]
+    [Before<core.window>]
+    [Before<core.renderer>]
+    system UpdateTickState {
+        let time_entity: entity = getFirstEntity<Time>();
+        let tick_state_entity: entity = getFirstEntity<TickState>();
+
+        if (time_entity == null || tick_state_entity == null) {
+            return;
+        }
+
+        let time: Time = time_entity[Time];
+        let tick: TickState = tick_state_entity[TickState];
+
+        tick.should_update = false;
+        tick.delta_seconds = 0.0;
+        tick.total_elapsed_ns = tick.total_elapsed_ns + time.last_tick_duration_ns;
+        tick.accumulator_ns = tick.accumulator_ns + time.last_tick_duration_ns;
+
+        if (time.tick_count == 1.0) {
+            tick.should_update = true;
+            tick.delta_seconds = 1.0 / 60.0;
+            tick.update_count = tick.update_count + 1.0;
+        } else if (tick.accumulator_ns >= 16666667) {
+            tick.accumulator_ns = tick.accumulator_ns - 16666667;
+            tick.should_update = true;
+            tick.delta_seconds = 1.0 / 60.0;
+            tick.update_count = tick.update_count + 1.0;
+        }
+
+        if (tick.should_update && tick.update_count == 1.0) {
+            print("pong.tick-state");
+        }
+
+        if (tick.total_elapsed_ns >= 5000000000) {
+            print("pong.stop");
+            stop();
+        }
+    }
+
+    [After<pong.UpdateTickState>]
+    [Before<core.window>]
+    [Before<core.renderer>]
+    system TrackPaddles {
+        let game_state_entity: entity = getFirstEntity<GameState>();
+        let tick_state_entity: entity = getFirstEntity<TickState>();
+
+        if (game_state_entity == null || tick_state_entity == null) {
+            return;
+        }
+
+        let tick: TickState = tick_state_entity[TickState];
+        if (!tick.should_update) {
+            return;
+        }
+
+        if (tick.update_count == 1.0) {
+            print("pong.track-paddles");
+        }
+
+        let game_state: GameState = game_state_entity[GameState];
+        let ball: Transform = game_state.ball[Transform];
+        let left_paddle: Transform = game_state.left_paddle[Transform];
+        let right_paddle: Transform = game_state.right_paddle[Transform];
+        let movement_step: f32 = 320.0 * tick.delta_seconds;
+        let minimum_y: f32 = 50.0;
+        let maximum_y: f32 = 540.0 - 50.0;
+
+        left_paddle.position.y = clamp(
+            move_towards(left_paddle.position.y, ball.position.y, movement_step),
+            minimum_y,
+            maximum_y
+        );
+        right_paddle.position.y = clamp(
+            move_towards(right_paddle.position.y, ball.position.y, movement_step),
+            minimum_y,
+            maximum_y
+        );
+    }
+
+    [After<pong.TrackPaddles>]
+    [Before<core.window>]
+    [Before<core.renderer>]
+    system MoveBall {
+        let game_state_entity: entity = getFirstEntity<GameState>();
+        let tick_state_entity: entity = getFirstEntity<TickState>();
+
+        if (game_state_entity == null || tick_state_entity == null) {
+            return;
+        }
+
+        let tick: TickState = tick_state_entity[TickState];
+        if (!tick.should_update) {
+            return;
+        }
+
+        if (tick.update_count == 1.0) {
+            print("pong.move-ball");
+        }
+
+        let game_state: GameState = game_state_entity[GameState];
+        let ball: Transform = game_state.ball[Transform];
+        let velocity: Velocity = game_state.ball[Velocity];
+
+        ball.position.x = ball.position.x + (velocity.value.x * tick.delta_seconds);
+        ball.position.y = ball.position.y + (velocity.value.y * tick.delta_seconds);
+        ball.rotation = ball.rotation + (2.5 * tick.delta_seconds);
+    }
+
+    [After<pong.MoveBall>]
+    [Before<core.window>]
+    [Before<core.renderer>]
+    system BounceBall {
+        let game_state_entity: entity = getFirstEntity<GameState>();
+        let tick_state_entity: entity = getFirstEntity<TickState>();
+
+        if (game_state_entity == null || tick_state_entity == null) {
+            return;
+        }
+
+        let tick: TickState = tick_state_entity[TickState];
+        if (!tick.should_update) {
+            return;
+        }
+
+        if (tick.update_count == 1.0) {
+            print("pong.bounce-ball");
+        }
+
+        let game_state: GameState = game_state_entity[GameState];
+        let ball: Transform = game_state.ball[Transform];
+        let velocity: Velocity = game_state.ball[Velocity];
+        let left_paddle: Transform = game_state.left_paddle[Transform];
+        let right_paddle: Transform = game_state.right_paddle[Transform];
+
+        if (rect_top(ball) <= 0.0) {
+            ball.position.y = ball.scale.y * 0.5;
+            velocity.value.y = 0.0 - velocity.value.y;
+        } else if (rect_bottom(ball) >= 540.0) {
+            ball.position.y = 540.0 - (ball.scale.y * 0.5);
+            velocity.value.y = 0.0 - velocity.value.y;
+        }
+
+        if (velocity.value.x < 0.0 && overlaps(ball, left_paddle)) {
+            let offset: f32 = (ball.position.y - left_paddle.position.y) / 50.0;
+            ball.position.x = rect_right(left_paddle) + (ball.scale.x * 0.5);
+            velocity.value.x = 420.0;
+            velocity.value.y = offset * 420.0 * 0.75;
+        } else if (velocity.value.x > 0.0 && overlaps(ball, right_paddle)) {
+            let offset: f32 = (ball.position.y - right_paddle.position.y) / 50.0;
+            ball.position.x = rect_left(right_paddle) - (ball.scale.x * 0.5);
+            velocity.value.x = 0.0 - 420.0;
+            velocity.value.y = offset * 420.0 * 0.75;
+        }
+    }
+
+    [After<pong.BounceBall>]
+    [Before<core.window>]
+    [Before<core.renderer>]
+    system ScoreBall {
+        let game_state_entity: entity = getFirstEntity<GameState>();
+        let tick_state_entity: entity = getFirstEntity<TickState>();
+
+        if (game_state_entity == null || tick_state_entity == null) {
+            return;
+        }
+
+        let tick: TickState = tick_state_entity[TickState];
+        if (!tick.should_update) {
+            return;
+        }
+
+        if (tick.update_count == 1.0) {
+            print("pong.score-ball");
+        }
+
+        let game_state: GameState = game_state_entity[GameState];
+        let ball: Transform = game_state.ball[Transform];
+        let velocity: Velocity = game_state.ball[Velocity];
+
         if (ball.position.x < 0.0) {
-            reset_ball(window, ball, velocity, 1.0);
-        } else if (ball.position.x > window.width) {
-            reset_ball(window, ball, velocity, -1.0);
+            game_state.right_score = game_state.right_score + 1.0;
+            game_state.serve_direction = 1.0;
+            reset_ball(ball, velocity, game_state.serve_direction);
+            print("pong.score.right");
+        } else if (ball.position.x > 960.0) {
+            game_state.left_score = game_state.left_score + 1.0;
+            game_state.serve_direction = -1.0;
+            reset_ball(ball, velocity, game_state.serve_direction);
+            print("pong.score.left");
         }
     }
 }

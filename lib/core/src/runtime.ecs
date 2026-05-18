@@ -1,4 +1,12 @@
 namespace core {
     fn Print(message: string);
+    fn print(message: string);
     fn Stop();
+    fn stop();
+    fn spawn(): entity;
+    fn getFirstEntity(): entity;
+
+    system time();
+    system window();
+    system renderer();
 }

@@ -302,6 +302,9 @@ static size_t ecsvm_builtin_layout(const char *qualified_name, size_t *out_align
     } else if (strcmp(qualified_name, "core.UInt32") == 0) {
         size = sizeof(uint32_t);
         alignment = ECSVM_ALIGNOF(uint32_t);
+    } else if (strcmp(qualified_name, "core.UInt64") == 0) {
+        size = sizeof(uint64_t);
+        alignment = ECSVM_ALIGNOF(uint64_t);
     } else if (strcmp(qualified_name, "core.Float32") == 0) {
         size = sizeof(float);
         alignment = ECSVM_ALIGNOF(float);
@@ -598,9 +601,13 @@ static int ecsvm_collect_semantic_from_node(
                 } else {
                     attribute_name = ecsvm_tokens_to_name(file, child->name_start, child->name_end);
                 }
-                attribute_data = (child->value_start != 0u || child->value_end != 0u)
-                    ? ecsvm_tokens_to_source(file, child->value_start, child->value_end)
-                    : NULL;
+                if (child->type_start != 0u || child->type_end != 0u) {
+                    attribute_data = ecsvm_tokens_to_name(file, child->type_start, child->type_end);
+                } else if (child->value_start != 0u || child->value_end != 0u) {
+                    attribute_data = ecsvm_tokens_to_source(file, child->value_start, child->value_end);
+                } else {
+                    attribute_data = NULL;
+                }
 
                 if (attribute_name == NULL ||
                     !ecsvm_semantic_attribute_push(&semantic_struct, attribute_name, attribute_data)) {
@@ -679,11 +686,20 @@ static int ecsvm_collect_semantic_from_node(
             child = &nodes->items[child_index];
             if (child->kind == ECSVM_SYNTAX_ATTRIBUTE) {
                 char *attribute_name;
+                char *attribute_data;
 
                 attribute_name = ecsvm_tokens_to_name(file, child->name_start, child->name_end);
+                if (child->type_start != 0u || child->type_end != 0u) {
+                    attribute_data = ecsvm_tokens_to_name(file, child->type_start, child->type_end);
+                } else if (child->value_start != 0u || child->value_end != 0u) {
+                    attribute_data = ecsvm_tokens_to_source(file, child->value_start, child->value_end);
+                } else {
+                    attribute_data = NULL;
+                }
                 if (attribute_name == NULL ||
-                    !ecsvm_semantic_function_attribute_push(&semantic_function, attribute_name)) {
+                    !ecsvm_semantic_function_attribute_push(&semantic_function, attribute_name, attribute_data)) {
                     free(attribute_name);
+                    free(attribute_data);
                     ecsvm_semantic_function_free(&semantic_function);
                     ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting function attributes");
                     return 0;
@@ -726,7 +742,7 @@ static int ecsvm_collect_semantic_from_node(
 
             system_attribute_name = ecsvm_copy_string("core.System");
             if (system_attribute_name == NULL ||
-                !ecsvm_semantic_function_attribute_push(&semantic_function, system_attribute_name)) {
+                !ecsvm_semantic_function_attribute_push(&semantic_function, system_attribute_name, NULL)) {
                 free(system_attribute_name);
                 ecsvm_semantic_function_free(&semantic_function);
                 ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting system attribute");
@@ -857,6 +873,7 @@ int ecsvm_resolve_semantic_types(
     for (struct_index = 0u; struct_index < semantic_functions->count; ++struct_index) {
         ecsvm_semantic_function_t *semantic_function;
         size_t parameter_index;
+        size_t attribute_index;
         char *resolved_return_type;
 
         semantic_function = &semantic_functions->items[struct_index];
@@ -883,6 +900,23 @@ int ecsvm_resolve_semantic_types(
             }
         }
 
+        for (attribute_index = 0u; attribute_index < semantic_function->attribute_count; ++attribute_index) {
+            char *resolved_attribute;
+
+            resolved_attribute = ecsvm_resolve_type_name(
+                semantic_structs,
+                semantic_function->namespace_name,
+                semantic_function->attributes[attribute_index]
+            );
+            if (resolved_attribute == NULL) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving function attributes");
+                return 0;
+            }
+
+            free(semantic_function->attributes[attribute_index]);
+            semantic_function->attributes[attribute_index] = resolved_attribute;
+        }
+
         resolved_return_type = ecsvm_resolve_type_name(
             semantic_structs,
             semantic_function->namespace_name,
@@ -900,6 +934,30 @@ int ecsvm_resolve_semantic_types(
             ecsvm_find_semantic_struct(semantic_structs, resolved_return_type) < 0) {
             ecsvm_set_error(error_message, error_message_capacity, "function return type does not resolve");
             return 0;
+        }
+
+        for (attribute_index = 0u; attribute_index < semantic_function->attribute_count; ++attribute_index) {
+            char *resolved_data;
+
+            if (semantic_function->attribute_data[attribute_index] == NULL) {
+                continue;
+            }
+
+            if (strcmp(semantic_function->attributes[attribute_index], "core.Before") == 0 ||
+                strcmp(semantic_function->attributes[attribute_index], "core.After") == 0) {
+                resolved_data = ecsvm_resolve_function_name(
+                    semantic_functions,
+                    semantic_function->namespace_name,
+                    semantic_function->attribute_data[attribute_index]
+                );
+                if (resolved_data == NULL) {
+                    ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving function attribute targets");
+                    return 0;
+                }
+
+                free(semantic_function->attribute_data[attribute_index]);
+                semantic_function->attribute_data[attribute_index] = resolved_data;
+            }
         }
     }
 
@@ -1547,8 +1605,19 @@ static int ecsvm_serialize_function_ast_node(
             return 0;
         }
 
-        resolved_id = ecsvm_resolve_parameter_id(semantic_function, function_ref, text, length);
-        if (resolved_id != 0u) {
+        if (parent_kind == ECSVM_AST_NODE_MEMBER_EXPRESSION &&
+            previous_index != 0u) {
+            if (!ecsvm_serialize_ast_blob_text(
+                    semantic_function->body_source_file,
+                    source_node,
+                    blobs,
+                    &serialized_nodes[node_index],
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+        } else if ((resolved_id = ecsvm_resolve_parameter_id(semantic_function, function_ref, text, length)) != 0u) {
             serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_PARAMETER_ID;
             serialized_nodes[node_index].value = resolved_id;
         } else if (parent_kind == ECSVM_AST_NODE_CALL_EXPRESSION &&
@@ -1616,6 +1685,44 @@ static int ecsvm_serialize_function_ast_node(
         }
         serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_TYPE_REF_ID;
         serialized_nodes[node_index].value = resolved_id;
+    } else if (source_node->kind == ECSVM_AST_NODE_INDEX_EXPRESSION) {
+        char *type_name;
+        uint32_t resolved_id;
+
+        type_name = NULL;
+        resolved_id = 0u;
+        if (first_child == NULL ||
+            first_child->next_sibling == 0u ||
+            !ecsvm_ast_callee_name(
+                semantic_function->body_source_file,
+                &semantic_function->body_nodes,
+                first_child->next_sibling,
+                &type_name,
+                error_message,
+                error_message_capacity
+            )) {
+            free(type_name);
+            return 0;
+        }
+        if (type_name != NULL &&
+            (!ecsvm_resolve_type_id(
+                semantic_structs,
+                semantic_function->namespace_name,
+                type_name,
+                strlen(type_name),
+                type_refs,
+                &resolved_id
+            ) ||
+             resolved_id == 0u)) {
+            free(type_name);
+            ecsvm_set_error(error_message, error_message_capacity, "unresolved type reference in index expression");
+            return 0;
+        }
+        free(type_name);
+        if (resolved_id != 0u) {
+            serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_TYPE_REF_ID;
+            serialized_nodes[node_index].value = resolved_id;
+        }
     } else if (source_node->kind == ECSVM_AST_NODE_LITERAL_EXPRESSION) {
         if (!ecsvm_serialize_ast_blob_text(
                 semantic_function->body_source_file,
@@ -1917,8 +2024,15 @@ int ecsvm_build_ecsbin_tables(
                 blobs,
                 semantic_function->attributes[attribute_index]
             );
-            attribute.data_blob_id = empty_blob_id;
+            attribute.data_blob_id = semantic_function->attribute_data[attribute_index] == NULL
+                ? empty_blob_id
+                : ecsvm_ensure_blob(
+                    blobs,
+                    semantic_function->attribute_data[attribute_index],
+                    strlen(semantic_function->attribute_data[attribute_index])
+                );
             if (attribute.type_id == 0u ||
+                attribute.data_blob_id == 0u ||
                 !ecsvm_attribute_builder_array_push(attributes, attribute)) {
                 free(function_ref.namespace_name);
                 free(function_ref.name);
@@ -2187,6 +2301,9 @@ static const char *ecsvm_c_type_name(const char *qualified_name)
     }
     if (strcmp(qualified_name, "core.UInt32") == 0) {
         return "uint32_t";
+    }
+    if (strcmp(qualified_name, "core.UInt64") == 0) {
+        return "uint64_t";
     }
     if (strcmp(qualified_name, "core.Float32") == 0) {
         return "float";

@@ -1,6 +1,13 @@
 #include "ecsvm_internal.h"
 
 #include "bin_internal.h"
+#include "ecsvm/system_time.h"
+
+#if ECSVM_ENABLE_SDL3
+#include "ecsvm/component.h"
+#include "ecsvm/system_renderer.h"
+#include "ecsvm/system_window.h"
+#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -98,55 +105,86 @@ static int ecsvm_managed_blob_to_double(
     return ok;
 }
 
-static int ecsvm_managed_is_truthy(const ecsvm_managed_value_t *value)
-{
-    switch (value->kind) {
-        case ECSVM_MANAGED_VALUE_NULL:
-        case ECSVM_MANAGED_VALUE_VOID:
-            return 0;
-        case ECSVM_MANAGED_VALUE_BOOL:
-            return value->boolean_value != 0;
-        case ECSVM_MANAGED_VALUE_NUMBER:
-            return value->number_value != 0.0;
-        case ECSVM_MANAGED_VALUE_STRING:
-            return value->blob_id != 0u;
-        default:
-            return 0;
-    }
-}
-
-static int ecsvm_managed_values_equal(
-    const ecsvm_ecsbin_module_t *module,
-    const ecsvm_managed_value_t *left,
-    const ecsvm_managed_value_t *right
+static ecsvm_managed_value_t ecsvm_managed_reference_value(
+    uint32_t type_id,
+    void *reference_value
 )
 {
-    if (left->kind != right->kind) {
+    ecsvm_managed_value_t value;
+
+    memset(&value, 0, sizeof(value));
+    value.kind = ECSVM_MANAGED_VALUE_REFERENCE;
+    value.type_id = type_id;
+    value.reference_value = reference_value;
+    return value;
+}
+
+static const char *ecsvm_managed_type_name(
+    const ecsvm_ecsbin_module_t *module,
+    uint32_t type_id
+)
+{
+    const ecsvm_ecsbin_type_ref_t *type_ref;
+
+    type_ref = ecsvm_ecsbin_type_ref(module, type_id);
+    return type_ref != NULL ? type_ref->qualified_name : NULL;
+}
+
+static int ecsvm_managed_is_scalar_type_name(const char *qualified_name)
+{
+    return qualified_name != NULL &&
+        (strcmp(qualified_name, "core.Entity") == 0 ||
+         strcmp(qualified_name, "core.Int32") == 0 ||
+         strcmp(qualified_name, "core.UInt32") == 0 ||
+         strcmp(qualified_name, "core.UInt64") == 0 ||
+         strcmp(qualified_name, "core.Float32") == 0 ||
+         strcmp(qualified_name, "core.Bool") == 0 ||
+         strcmp(qualified_name, "core.Blob") == 0 ||
+         strcmp(qualified_name, "core.String") == 0);
+}
+
+static int ecsvm_managed_load_scalar(
+    const ecsvm_ecsbin_module_t *module,
+    uint32_t type_id,
+    const void *data,
+    ecsvm_managed_value_t *out_value
+)
+{
+    const char *qualified_name;
+
+    if (module == NULL || data == NULL || out_value == NULL) {
         return 0;
     }
 
-    switch (left->kind) {
-        case ECSVM_MANAGED_VALUE_VOID:
-        case ECSVM_MANAGED_VALUE_NULL:
-            return 1;
-        case ECSVM_MANAGED_VALUE_BOOL:
-            return left->boolean_value == right->boolean_value;
-        case ECSVM_MANAGED_VALUE_NUMBER:
-            return left->number_value == right->number_value;
-        case ECSVM_MANAGED_VALUE_STRING: {
-            const ecsvm_ecsbin_blob_t *left_blob;
-            const ecsvm_ecsbin_blob_t *right_blob;
-
-            left_blob = ecsvm_managed_blob(module, left->blob_id);
-            right_blob = ecsvm_managed_blob(module, right->blob_id);
-            return left_blob != NULL &&
-                right_blob != NULL &&
-                left_blob->length == right_blob->length &&
-                (left_blob->length == 0u || memcmp(left_blob->data, right_blob->data, (size_t)left_blob->length) == 0);
-        }
-        default:
-            return 0;
+    qualified_name = ecsvm_managed_type_name(module, type_id);
+    if (qualified_name == NULL) {
+        return 0;
     }
+
+    memset(out_value, 0, sizeof(*out_value));
+    if (strcmp(qualified_name, "core.Bool") == 0) {
+        out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
+        out_value->boolean_value = *(const unsigned char *)data != 0;
+        return 1;
+    }
+
+    out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
+    if (strcmp(qualified_name, "core.Int32") == 0) {
+        out_value->number_value = (double)*(const int32_t *)data;
+    } else if (strcmp(qualified_name, "core.UInt32") == 0 ||
+               strcmp(qualified_name, "core.Entity") == 0 ||
+               strcmp(qualified_name, "core.Blob") == 0 ||
+               strcmp(qualified_name, "core.String") == 0) {
+        out_value->number_value = (double)*(const uint32_t *)data;
+    } else if (strcmp(qualified_name, "core.UInt64") == 0) {
+        out_value->number_value = (double)*(const uint64_t *)data;
+    } else if (strcmp(qualified_name, "core.Float32") == 0) {
+        out_value->number_value = (double)*(const float *)data;
+    } else {
+        return 0;
+    }
+
+    return 1;
 }
 
 static ecsvm_managed_value_t ecsvm_managed_null_value(void)
@@ -163,6 +201,70 @@ static ecsvm_managed_value_t ecsvm_managed_void_value(void)
     memset(&value, 0, sizeof(value));
     value.kind = ECSVM_MANAGED_VALUE_VOID;
     return value;
+}
+
+static int ecsvm_managed_store_scalar(
+    const ecsvm_ecsbin_module_t *module,
+    uint32_t type_id,
+    void *data,
+    const ecsvm_managed_value_t *value
+)
+{
+    const char *qualified_name;
+    ecsvm_managed_value_t scalar;
+
+    if (module == NULL || data == NULL || value == NULL) {
+        return 0;
+    }
+
+    qualified_name = ecsvm_managed_type_name(module, type_id);
+    if (qualified_name == NULL) {
+        return 0;
+    }
+
+    scalar = *value;
+    if (scalar.kind == ECSVM_MANAGED_VALUE_VOID ||
+        scalar.kind == ECSVM_MANAGED_VALUE_NULL ||
+        scalar.kind == ECSVM_MANAGED_VALUE_REFERENCE) {
+        return 0;
+    }
+
+    if (strcmp(qualified_name, "core.Bool") == 0) {
+        if (scalar.kind == ECSVM_MANAGED_VALUE_BOOL) {
+            *(unsigned char *)data = (unsigned char)(scalar.boolean_value != 0);
+            return 1;
+        }
+        if (scalar.kind == ECSVM_MANAGED_VALUE_NUMBER) {
+            *(unsigned char *)data = (unsigned char)(scalar.number_value != 0.0);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (scalar.kind == ECSVM_MANAGED_VALUE_BOOL) {
+        scalar.kind = ECSVM_MANAGED_VALUE_NUMBER;
+        scalar.number_value = scalar.boolean_value ? 1.0 : 0.0;
+    }
+    if (scalar.kind != ECSVM_MANAGED_VALUE_NUMBER) {
+        return 0;
+    }
+
+    if (strcmp(qualified_name, "core.Int32") == 0) {
+        *(int32_t *)data = (int32_t)scalar.number_value;
+    } else if (strcmp(qualified_name, "core.UInt32") == 0 ||
+               strcmp(qualified_name, "core.Entity") == 0 ||
+               strcmp(qualified_name, "core.Blob") == 0 ||
+               strcmp(qualified_name, "core.String") == 0) {
+        *(uint32_t *)data = (uint32_t)scalar.number_value;
+    } else if (strcmp(qualified_name, "core.UInt64") == 0) {
+        *(uint64_t *)data = (uint64_t)scalar.number_value;
+    } else if (strcmp(qualified_name, "core.Float32") == 0) {
+        *(float *)data = (float)scalar.number_value;
+    } else {
+        return 0;
+    }
+
+    return 1;
 }
 
 static int ecsvm_managed_frame_set_local(
@@ -217,9 +319,383 @@ static int ecsvm_managed_frame_get_local(
     return 0;
 }
 
+static ecsvm_status_t ecsvm_managed_eval_expression(
+    ecsvm_managed_frame_t *frame,
+    uint32_t node_index,
+    ecsvm_managed_value_t *out_value
+);
+
+static int ecsvm_managed_materialize_value(
+    const ecsvm_managed_runtime_t *runtime,
+    const ecsvm_managed_value_t *value,
+    ecsvm_managed_value_t *out_value
+)
+{
+    const char *qualified_name;
+
+    if (runtime == NULL || value == NULL || out_value == NULL) {
+        return 0;
+    }
+
+    if (value->kind != ECSVM_MANAGED_VALUE_REFERENCE) {
+        *out_value = *value;
+        return 1;
+    }
+
+    if (value->reference_value == NULL) {
+        return 0;
+    }
+
+    qualified_name = ecsvm_managed_type_name(runtime->module, value->type_id);
+    if (!ecsvm_managed_is_scalar_type_name(qualified_name)) {
+        *out_value = *value;
+        return 1;
+    }
+
+    return ecsvm_managed_load_scalar(
+        runtime->module,
+        value->type_id,
+        value->reference_value,
+        out_value
+    );
+}
+
+static int ecsvm_managed_is_truthy(
+    const ecsvm_managed_runtime_t *runtime,
+    const ecsvm_managed_value_t *value
+)
+{
+    ecsvm_managed_value_t resolved;
+
+    if (!ecsvm_managed_materialize_value(runtime, value, &resolved)) {
+        return 0;
+    }
+
+    switch (resolved.kind) {
+        case ECSVM_MANAGED_VALUE_NULL:
+        case ECSVM_MANAGED_VALUE_VOID:
+            return 0;
+        case ECSVM_MANAGED_VALUE_BOOL:
+            return resolved.boolean_value != 0;
+        case ECSVM_MANAGED_VALUE_NUMBER:
+            return resolved.number_value != 0.0;
+        case ECSVM_MANAGED_VALUE_STRING:
+            return resolved.blob_id != 0u;
+        case ECSVM_MANAGED_VALUE_REFERENCE:
+            return resolved.reference_value != NULL;
+        default:
+            return 0;
+    }
+}
+
+static int ecsvm_managed_values_equal(
+    const ecsvm_managed_runtime_t *runtime,
+    const ecsvm_managed_value_t *left,
+    const ecsvm_managed_value_t *right
+)
+{
+    ecsvm_managed_value_t resolved_left;
+    ecsvm_managed_value_t resolved_right;
+
+    if (!ecsvm_managed_materialize_value(runtime, left, &resolved_left) ||
+        !ecsvm_managed_materialize_value(runtime, right, &resolved_right)) {
+        return 0;
+    }
+
+    if (resolved_left.kind != resolved_right.kind) {
+        return 0;
+    }
+
+    switch (resolved_left.kind) {
+        case ECSVM_MANAGED_VALUE_VOID:
+        case ECSVM_MANAGED_VALUE_NULL:
+            return 1;
+        case ECSVM_MANAGED_VALUE_BOOL:
+            return resolved_left.boolean_value == resolved_right.boolean_value;
+        case ECSVM_MANAGED_VALUE_NUMBER:
+            return resolved_left.number_value == resolved_right.number_value;
+        case ECSVM_MANAGED_VALUE_STRING: {
+            const ecsvm_ecsbin_blob_t *left_blob;
+            const ecsvm_ecsbin_blob_t *right_blob;
+
+            left_blob = ecsvm_managed_blob(runtime->module, resolved_left.blob_id);
+            right_blob = ecsvm_managed_blob(runtime->module, resolved_right.blob_id);
+            return left_blob != NULL &&
+                right_blob != NULL &&
+                left_blob->length == right_blob->length &&
+                (left_blob->length == 0u || memcmp(left_blob->data, right_blob->data, (size_t)left_blob->length) == 0);
+        }
+        case ECSVM_MANAGED_VALUE_REFERENCE:
+            return resolved_left.type_id == resolved_right.type_id &&
+                resolved_left.reference_value == resolved_right.reference_value;
+        default:
+            return 0;
+    }
+}
+
+static int ecsvm_managed_entity_from_value(
+    const ecsvm_managed_runtime_t *runtime,
+    const ecsvm_managed_value_t *value,
+    ecsvm_entity_t *out_entity
+)
+{
+    ecsvm_managed_value_t resolved;
+
+    if (out_entity == NULL ||
+        !ecsvm_managed_materialize_value(runtime, value, &resolved) ||
+        resolved.kind != ECSVM_MANAGED_VALUE_NUMBER) {
+        return 0;
+    }
+
+    *out_entity = (ecsvm_entity_t)resolved.number_value;
+    return 1;
+}
+
+static int ecsvm_managed_type_field(
+    const ecsvm_ecsbin_module_t *module,
+    uint32_t type_id,
+    const char *field_name,
+    size_t field_name_length,
+    uint32_t *out_field_type_id,
+    size_t *out_field_offset
+)
+{
+    int struct_index;
+    const ecsvm_ecsbin_struct_def_t *definition;
+    size_t offset;
+    size_t field_index;
+
+    if (module == NULL ||
+        field_name == NULL ||
+        out_field_type_id == NULL ||
+        out_field_offset == NULL) {
+        return 0;
+    }
+
+    struct_index = ecsvm_ecsbin_find_struct_index_by_type(module, type_id);
+    if (struct_index < 0) {
+        return 0;
+    }
+
+    definition = &module->struct_defs[struct_index];
+    offset = 0u;
+    for (field_index = 0u; field_index < definition->field_count; ++field_index) {
+        const ecsvm_ecsbin_field_ref_t *field_ref;
+        const ecsvm_ecsbin_type_ref_t *field_type;
+        size_t field_size;
+        size_t field_alignment;
+        int nested_index;
+
+        if (definition->field_start == 0u ||
+            definition->field_start - 1u + field_index >= module->field_ref_count) {
+            return 0;
+        }
+
+        field_ref = &module->field_refs[definition->field_start - 1u + field_index];
+        field_type = ecsvm_ecsbin_type_ref(module, field_ref->type_id);
+        if (field_type == NULL || field_type->qualified_name == NULL) {
+            return 0;
+        }
+
+        field_size = ecsvm_ecsbin_builtin_layout(field_type->qualified_name, &field_alignment);
+        if (field_size == 0u) {
+            nested_index = ecsvm_ecsbin_find_struct_index_by_type(module, field_ref->type_id);
+            if (nested_index < 0) {
+                return 0;
+            }
+            field_size = module->struct_defs[nested_index].size;
+            field_alignment = module->struct_defs[nested_index].alignment;
+        }
+
+        offset = ecsvm_ecsbin_align_up(offset, field_alignment);
+        if (strlen(field_ref->name) == field_name_length &&
+            memcmp(field_ref->name, field_name, field_name_length) == 0) {
+            *out_field_type_id = field_ref->type_id;
+            *out_field_offset = offset;
+            return 1;
+        }
+        offset += field_size;
+    }
+
+    return 0;
+}
+
+static int ecsvm_managed_component_pointer(
+    ecsvm_managed_frame_t *frame,
+    uint32_t type_id,
+    ecsvm_entity_t entity,
+    int create_if_missing,
+    void **out_pointer
+)
+{
+    const ecsvm_ecsbin_type_ref_t *type_ref;
+    const ecsvm_ecsbin_struct_def_t *definition;
+    ecsvm_component_id_t component_id;
+    void *component_data;
+
+    if (frame == NULL || out_pointer == NULL) {
+        return 0;
+    }
+
+    type_ref = ecsvm_ecsbin_type_ref(frame->runtime->module, type_id);
+    definition = type_ref != NULL
+        ? ecsvm_ecsbin_find_struct(frame->runtime->module, type_ref->qualified_name)
+        : NULL;
+    if (type_ref == NULL ||
+        type_ref->qualified_name == NULL ||
+        definition == NULL ||
+        !ecsvm_ecsbin_struct_is_component(frame->runtime->module, definition)) {
+        return 0;
+    }
+
+    component_id = ecsvm_engine_find_component(frame->runtime->engine, type_ref->qualified_name);
+    if (component_id == ECSVM_INVALID_COMPONENT) {
+        return 0;
+    }
+
+    component_data = ecsvm_component_get_mutable(
+        frame->runtime->engine,
+        component_id,
+        entity
+    );
+    if (component_data == NULL && create_if_missing) {
+        unsigned char *initial_value;
+        ecsvm_status_t status;
+
+        initial_value = (unsigned char *)calloc(1u, definition->size);
+        if (initial_value == NULL) {
+            return 0;
+        }
+
+        status = ecsvm_component_set(
+            frame->runtime->engine,
+            component_id,
+            entity,
+            initial_value
+        );
+        free(initial_value);
+        if (status != ECSVM_OK) {
+            return 0;
+        }
+
+        component_data = ecsvm_component_get_mutable(
+            frame->runtime->engine,
+            component_id,
+            entity
+        );
+    }
+
+    if (component_data == NULL) {
+        return 0;
+    }
+
+    *out_pointer = component_data;
+    return 1;
+}
+
+static int ecsvm_managed_resolve_reference(
+    ecsvm_managed_frame_t *frame,
+    uint32_t node_index,
+    int create_if_missing,
+    ecsvm_managed_value_t *out_value
+)
+{
+    const ecsvm_ecsbin_ast_node_t *node;
+
+    if (frame == NULL || out_value == NULL || node_index >= frame->ast.node_count) {
+        return 0;
+    }
+
+    node = &frame->ast.nodes[node_index];
+    switch (node->kind) {
+        case ECSVM_ECSBIN_AST_NODE_IDENTIFIER:
+            if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_PARAMETER_ID) {
+                uint32_t parameter_index;
+
+                parameter_index = node->value - frame->function_ref->parameter_start;
+                if (frame->function_ref->parameter_start == 0u ||
+                    node->value < frame->function_ref->parameter_start ||
+                    parameter_index >= frame->function_ref->parameter_count) {
+                    return 0;
+                }
+                *out_value = frame->arguments[parameter_index];
+                return out_value->kind == ECSVM_MANAGED_VALUE_REFERENCE;
+            }
+            if (node->value_kind == ECSVM_ECSBIN_AST_VALUE_BLOB_ID &&
+                ecsvm_managed_frame_get_local(frame, node->value, out_value)) {
+                return out_value->kind == ECSVM_MANAGED_VALUE_REFERENCE;
+            }
+            return 0;
+        case ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION: {
+            ecsvm_managed_value_t entity_value;
+            ecsvm_entity_t entity;
+            void *component_data;
+
+            if (node->first_child == 0u ||
+                node->value_kind != ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID ||
+                ecsvm_managed_eval_expression(frame, node->first_child, &entity_value) != ECSVM_OK ||
+                !ecsvm_managed_entity_from_value(frame->runtime, &entity_value, &entity) ||
+                !ecsvm_managed_component_pointer(
+                    frame,
+                    node->value,
+                    entity,
+                    create_if_missing,
+                    &component_data
+                )) {
+                return 0;
+            }
+
+            *out_value = ecsvm_managed_reference_value(node->value, component_data);
+            return 1;
+        }
+        case ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION: {
+            const ecsvm_ecsbin_ast_node_t *left_node;
+            const ecsvm_ecsbin_ast_node_t *field_node;
+            const ecsvm_ecsbin_blob_t *field_blob;
+            ecsvm_managed_value_t base_value;
+            uint32_t field_type_id;
+            size_t field_offset;
+
+            left_node = node->first_child == 0u ? NULL : &frame->ast.nodes[node->first_child];
+            field_node = left_node != NULL && left_node->next_sibling != 0u
+                ? &frame->ast.nodes[left_node->next_sibling]
+                : NULL;
+            if (field_node == NULL ||
+                field_node->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
+                field_node->value_kind != ECSVM_ECSBIN_AST_VALUE_BLOB_ID ||
+                !ecsvm_managed_resolve_reference(frame, node->first_child, create_if_missing, &base_value) ||
+                base_value.kind != ECSVM_MANAGED_VALUE_REFERENCE) {
+                return 0;
+            }
+
+            field_blob = ecsvm_managed_blob(frame->runtime->module, field_node->value);
+            if (field_blob == NULL ||
+                !ecsvm_managed_type_field(
+                    frame->runtime->module,
+                    base_value.type_id,
+                    (const char *)field_blob->data,
+                    (size_t)field_blob->length,
+                    &field_type_id,
+                    &field_offset
+                )) {
+                return 0;
+            }
+
+            *out_value = ecsvm_managed_reference_value(
+                field_type_id,
+                (unsigned char *)base_value.reference_value + field_offset
+            );
+            return 1;
+        }
+        default:
+            return 0;
+    }
+}
+
 static ecsvm_status_t ecsvm_managed_invoke_function(
     ecsvm_managed_runtime_t *runtime,
     uint32_t function_id,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -289,26 +765,49 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             return ECSVM_OK;
         case ECSVM_ECSBIN_AST_NODE_GROUPING_EXPRESSION:
             return ecsvm_managed_eval_expression(frame, node->first_child, out_value);
+        case ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION:
+        case ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION: {
+            ecsvm_managed_value_t reference_value;
+            const char *qualified_name;
+
+            if (!ecsvm_managed_resolve_reference(frame, node_index, 0, &reference_value)) {
+                return ECSVM_ERROR_NOT_FOUND;
+            }
+
+            qualified_name = ecsvm_managed_type_name(frame->runtime->module, reference_value.type_id);
+            if (ecsvm_managed_is_scalar_type_name(qualified_name) &&
+                !ecsvm_managed_materialize_value(frame->runtime, &reference_value, out_value)) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_managed_is_scalar_type_name(qualified_name)) {
+                *out_value = reference_value;
+            }
+            return ECSVM_OK;
+        }
         case ECSVM_ECSBIN_AST_NODE_UNARY_EXPRESSION: {
             ecsvm_managed_value_t operand;
+            ecsvm_managed_value_t resolved_operand;
             if (ecsvm_managed_eval_expression(frame, node->first_child, &operand) != ECSVM_OK) {
                 return ECSVM_ERROR_ARGUMENT;
             }
             if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "!")) {
                 out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
-                out_value->boolean_value = !ecsvm_managed_is_truthy(&operand);
+                out_value->boolean_value = !ecsvm_managed_is_truthy(frame->runtime, &operand);
                 return ECSVM_OK;
             }
+            if (!ecsvm_managed_materialize_value(frame->runtime, &operand, &resolved_operand)) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
             if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "-")) {
-                if (operand.kind != ECSVM_MANAGED_VALUE_NUMBER) {
+                if (resolved_operand.kind != ECSVM_MANAGED_VALUE_NUMBER) {
                     return ECSVM_ERROR_ARGUMENT;
                 }
                 out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
-                out_value->number_value = -operand.number_value;
+                out_value->number_value = -resolved_operand.number_value;
                 return ECSVM_OK;
             }
             if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "+")) {
-                *out_value = operand;
+                *out_value = resolved_operand;
                 return ECSVM_OK;
             }
             return ECSVM_ERROR_ARGUMENT;
@@ -317,10 +816,16 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             const ecsvm_ecsbin_ast_node_t *right_node;
             ecsvm_managed_value_t left;
             ecsvm_managed_value_t right;
+            ecsvm_managed_value_t resolved_left;
+            ecsvm_managed_value_t resolved_right;
 
             right_node = &frame->ast.nodes[frame->ast.nodes[node->first_child].next_sibling];
             if (ecsvm_managed_eval_expression(frame, node->first_child, &left) != ECSVM_OK ||
                 ecsvm_managed_eval_expression(frame, frame->ast.nodes[node->first_child].next_sibling, &right) != ECSVM_OK) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (!ecsvm_managed_materialize_value(frame->runtime, &left, &resolved_left) ||
+                !ecsvm_managed_materialize_value(frame->runtime, &right, &resolved_right)) {
                 return ECSVM_ERROR_ARGUMENT;
             }
 
@@ -329,22 +834,22 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
                 ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "-") ||
                 ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "*") ||
                 ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "/")) {
-                if (left.kind != ECSVM_MANAGED_VALUE_NUMBER ||
-                    right.kind != ECSVM_MANAGED_VALUE_NUMBER) {
+                if (resolved_left.kind != ECSVM_MANAGED_VALUE_NUMBER ||
+                    resolved_right.kind != ECSVM_MANAGED_VALUE_NUMBER) {
                     return ECSVM_ERROR_ARGUMENT;
                 }
                 out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
                 if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "+")) {
-                    out_value->number_value = left.number_value + right.number_value;
+                    out_value->number_value = resolved_left.number_value + resolved_right.number_value;
                 } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "-")) {
-                    out_value->number_value = left.number_value - right.number_value;
+                    out_value->number_value = resolved_left.number_value - resolved_right.number_value;
                 } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "*")) {
-                    out_value->number_value = left.number_value * right.number_value;
+                    out_value->number_value = resolved_left.number_value * resolved_right.number_value;
                 } else {
-                    if (right.number_value == 0.0) {
+                    if (resolved_right.number_value == 0.0) {
                         return ECSVM_ERROR_ARGUMENT;
                     }
-                    out_value->number_value = left.number_value / right.number_value;
+                    out_value->number_value = resolved_left.number_value / resolved_right.number_value;
                 }
                 return ECSVM_OK;
             }
@@ -352,31 +857,41 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "==") ||
                 ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "!=")) {
                 out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
-                out_value->boolean_value = ecsvm_managed_values_equal(frame->runtime->module, &left, &right);
+                out_value->boolean_value = ecsvm_managed_values_equal(frame->runtime, &left, &right);
                 if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "!=")) {
                     out_value->boolean_value = !out_value->boolean_value;
                 }
                 return ECSVM_OK;
             }
 
-            if (left.kind != ECSVM_MANAGED_VALUE_NUMBER ||
-                right.kind != ECSVM_MANAGED_VALUE_NUMBER) {
+            if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "&&")) {
+                out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
+                out_value->boolean_value = ecsvm_managed_is_truthy(frame->runtime, &left) &&
+                    ecsvm_managed_is_truthy(frame->runtime, &right);
+                return ECSVM_OK;
+            }
+
+            if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "||")) {
+                out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
+                out_value->boolean_value = ecsvm_managed_is_truthy(frame->runtime, &left) ||
+                    ecsvm_managed_is_truthy(frame->runtime, &right);
+                return ECSVM_OK;
+            }
+
+            if (resolved_left.kind != ECSVM_MANAGED_VALUE_NUMBER ||
+                resolved_right.kind != ECSVM_MANAGED_VALUE_NUMBER) {
                 return ECSVM_ERROR_ARGUMENT;
             }
 
             out_value->kind = ECSVM_MANAGED_VALUE_BOOL;
             if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "<")) {
-                out_value->boolean_value = left.number_value < right.number_value;
+                out_value->boolean_value = resolved_left.number_value < resolved_right.number_value;
             } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, ">")) {
-                out_value->boolean_value = left.number_value > right.number_value;
+                out_value->boolean_value = resolved_left.number_value > resolved_right.number_value;
             } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "<=")) {
-                out_value->boolean_value = left.number_value <= right.number_value;
+                out_value->boolean_value = resolved_left.number_value <= resolved_right.number_value;
             } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, ">=")) {
-                out_value->boolean_value = left.number_value >= right.number_value;
-            } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "&&")) {
-                out_value->boolean_value = ecsvm_managed_is_truthy(&left) && ecsvm_managed_is_truthy(&right);
-            } else if (ecsvm_managed_blob_equals_cstr(frame->runtime->module, node->value, "||")) {
-                out_value->boolean_value = ecsvm_managed_is_truthy(&left) || ecsvm_managed_is_truthy(&right);
+                out_value->boolean_value = resolved_left.number_value >= resolved_right.number_value;
             } else {
                 return ECSVM_ERROR_ARGUMENT;
             }
@@ -385,12 +900,25 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
         case ECSVM_ECSBIN_AST_NODE_ASSIGNMENT_EXPRESSION: {
             const ecsvm_ecsbin_ast_node_t *left_node;
             ecsvm_managed_value_t value;
+            ecsvm_managed_value_t reference_value;
 
             left_node = &frame->ast.nodes[node->first_child];
-            if (left_node->kind != ECSVM_ECSBIN_AST_NODE_IDENTIFIER ||
-                left_node->value_kind != ECSVM_ECSBIN_AST_VALUE_BLOB_ID ||
-                ecsvm_managed_eval_expression(frame, left_node->next_sibling, &value) != ECSVM_OK ||
-                !ecsvm_managed_frame_set_local(frame, left_node->value, value)) {
+            if (ecsvm_managed_eval_expression(frame, left_node->next_sibling, &value) != ECSVM_OK) {
+                return ECSVM_ERROR_ARGUMENT;
+            }
+            if (left_node->kind == ECSVM_ECSBIN_AST_NODE_IDENTIFIER &&
+                left_node->value_kind == ECSVM_ECSBIN_AST_VALUE_BLOB_ID) {
+                if (!ecsvm_managed_frame_set_local(frame, left_node->value, value)) {
+                    return ECSVM_ERROR_ARGUMENT;
+                }
+            } else if (!ecsvm_managed_resolve_reference(frame, node->first_child, 1, &reference_value) ||
+                       reference_value.kind != ECSVM_MANAGED_VALUE_REFERENCE ||
+                       !ecsvm_managed_store_scalar(
+                           frame->runtime->module,
+                           reference_value.type_id,
+                           reference_value.reference_value,
+                           &value
+                       )) {
                 return ECSVM_ERROR_ARGUMENT;
             }
             *out_value = value;
@@ -398,21 +926,34 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
         }
         case ECSVM_ECSBIN_AST_NODE_CALL_EXPRESSION: {
             const ecsvm_ecsbin_ast_node_t *callee;
+            const ecsvm_ecsbin_ast_node_t *type_argument;
             const ecsvm_ecsbin_ast_node_t *argument_list;
             ecsvm_managed_value_t arguments[ECSVM_MANAGED_CALL_ARGUMENT_LIMIT];
             size_t argument_count;
             uint32_t child_index;
             uint32_t function_id;
+            uint32_t type_argument_id;
 
             callee = &frame->ast.nodes[node->first_child];
             function_id = node->value_kind == ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID
                 ? node->value
                 : 0u;
+            type_argument_id = 0u;
             if (function_id == 0u) {
                 return ECSVM_ERROR_ARGUMENT;
             }
 
-            argument_list = callee->next_sibling == 0u ? NULL : &frame->ast.nodes[callee->next_sibling];
+            type_argument = callee->next_sibling == 0u ? NULL : &frame->ast.nodes[callee->next_sibling];
+            if (type_argument != NULL &&
+                type_argument->kind == ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION &&
+                type_argument->value_kind == ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID) {
+                type_argument_id = type_argument->value;
+                argument_list = type_argument->next_sibling == 0u
+                    ? NULL
+                    : &frame->ast.nodes[type_argument->next_sibling];
+            } else {
+                argument_list = type_argument;
+            }
             if (argument_list == NULL ||
                 argument_list->kind != ECSVM_ECSBIN_AST_NODE_ARGUMENT_LIST) {
                 return ECSVM_ERROR_ARGUMENT;
@@ -432,6 +973,7 @@ static ecsvm_status_t ecsvm_managed_eval_expression(
             return ecsvm_managed_invoke_function(
                 frame->runtime,
                 function_id,
+                type_argument_id,
                 arguments,
                 argument_count,
                 out_value
@@ -519,7 +1061,7 @@ static ecsvm_status_t ecsvm_managed_execute_statement(
             if (ecsvm_managed_eval_expression(frame, node->first_child, &condition) != ECSVM_OK) {
                 return ECSVM_ERROR_ARGUMENT;
             }
-            if (ecsvm_managed_is_truthy(&condition)) {
+            if (ecsvm_managed_is_truthy(frame->runtime, &condition)) {
                 return ecsvm_managed_execute_statement(frame, condition_node->next_sibling);
             }
             if (else_node != NULL && else_node->kind == ECSVM_ECSBIN_AST_NODE_ELSE_CLAUSE &&
@@ -536,6 +1078,7 @@ static ecsvm_status_t ecsvm_managed_execute_statement(
 static ecsvm_status_t ecsvm_managed_invoke_function(
     ecsvm_managed_runtime_t *runtime,
     uint32_t function_id,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -560,6 +1103,7 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
             runtime->engine,
             runtime->module,
             function_ref,
+            type_argument_id,
             arguments,
             argument_count,
             out_value
@@ -598,17 +1142,151 @@ static ecsvm_status_t ecsvm_managed_system_callback(ecsvm_context_t *ctx)
     return ecsvm_managed_invoke_function(
         binding->runtime,
         binding->function_id,
+        0u,
         NULL,
         0u,
         &result
     );
 }
 
+static size_t ecsvm_function_dependency_count(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    const char *attribute_name
+)
+{
+    size_t attribute_index;
+    size_t count;
+
+    count = 0u;
+    if (module == NULL || function_ref == NULL || attribute_name == NULL) {
+        return 0u;
+    }
+
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref == NULL ||
+            type_ref->qualified_name == NULL ||
+            attribute == NULL ||
+            attribute->data == NULL ||
+            attribute->data[0] == '\0') {
+            continue;
+        }
+        if (strcmp(type_ref->qualified_name, attribute_name) == 0) {
+            count += 1u;
+        }
+    }
+
+    return count;
+}
+
+static int ecsvm_collect_function_dependencies(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    const char *attribute_name,
+    const char ***out_names,
+    size_t *out_count
+)
+{
+    const char **names;
+    size_t attribute_index;
+    size_t write_index;
+
+    *out_names = NULL;
+    *out_count = 0u;
+    *out_count = ecsvm_function_dependency_count(module, function_ref, attribute_name);
+    if (*out_count == 0u) {
+        return 1;
+    }
+
+    names = (const char **)calloc(*out_count, sizeof(*names));
+    if (names == NULL) {
+        return 0;
+    }
+
+    write_index = 0u;
+    for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+        const ecsvm_ecsbin_attribute_t *attribute;
+        const ecsvm_ecsbin_type_ref_t *type_ref;
+
+        attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
+        type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        if (type_ref == NULL ||
+            type_ref->qualified_name == NULL ||
+            attribute == NULL ||
+            attribute->data == NULL ||
+            attribute->data[0] == '\0' ||
+            strcmp(type_ref->qualified_name, attribute_name) != 0) {
+            continue;
+        }
+
+        names[write_index] = attribute->data;
+        write_index += 1u;
+    }
+
+    *out_names = names;
+    *out_count = write_index;
+    return 1;
+}
+
+#if ECSVM_ENABLE_SDL3
+static int ecsvm_module_references_system_dependency(
+    const ecsvm_ecsbin_module_t *module,
+    const char *system_name
+)
+{
+    size_t function_index;
+
+    if (module == NULL || system_name == NULL) {
+        return 0;
+    }
+
+    for (function_index = 0u; function_index < module->function_ref_count; ++function_index) {
+        const ecsvm_ecsbin_function_ref_t *function_ref;
+        size_t attribute_index;
+
+        function_ref = &module->function_refs[function_index];
+        for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
+            const ecsvm_ecsbin_attribute_t *attribute;
+            const ecsvm_ecsbin_type_ref_t *type_ref;
+
+            attribute = ecsvm_ecsbin_attribute_ref(
+                module,
+                function_ref->attribute_start + (uint32_t)attribute_index
+            );
+            type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+            if (attribute == NULL ||
+                attribute->data == NULL ||
+                type_ref == NULL ||
+                type_ref->qualified_name == NULL) {
+                continue;
+            }
+            if ((strcmp(type_ref->qualified_name, "core.Before") == 0 ||
+                 strcmp(type_ref->qualified_name, "core.After") == 0) &&
+                strcmp(attribute->data, system_name) == 0) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+#endif
+
 static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
 {
     ecsvm_engine_t *engine;
     ecsvm_managed_runtime_t runtime;
     ecsvm_managed_system_binding_t *bindings;
+    ecsvm_time_system_t time_system;
+#if ECSVM_ENABLE_SDL3
+    ecsvm_window_system_t *window_system;
+    ecsvm_renderer_system_t *renderer_system;
+#endif
     size_t system_count;
     size_t function_index;
     ecsvm_status_t status;
@@ -616,7 +1294,12 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     int exit_code;
 
     memset(&runtime, 0, sizeof(runtime));
+    memset(&time_system, 0, sizeof(time_system));
     bindings = NULL;
+#if ECSVM_ENABLE_SDL3
+    window_system = NULL;
+    renderer_system = NULL;
+#endif
     system_count = 0u;
     exit_code = 1;
 
@@ -660,6 +1343,21 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
         return 1;
     }
 
+    {
+        ecsvm_component_id_t time_component;
+
+        time_component = ecsvm_engine_find_component(engine, "core.Time");
+        if (time_component != ECSVM_INVALID_COMPONENT) {
+            ecsvm_time_system_init(&time_system, time_component);
+            status = ecsvm_time_system_register(engine, &time_system);
+            if (status != ECSVM_OK) {
+                fprintf(stderr, "failed to register native time system: %s\n", ecsvm_status_string(status));
+                ecsvm_engine_destroy(engine);
+                return 1;
+            }
+        }
+    }
+
     bindings = (ecsvm_managed_system_binding_t *)calloc(system_count, sizeof(*bindings));
     if (bindings == NULL) {
         fprintf(stderr, "out of memory while preparing managed systems\n");
@@ -671,6 +1369,10 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     for (function_index = 0u; function_index < module->function_ref_count; ++function_index) {
         const ecsvm_ecsbin_function_ref_t *function_ref;
         ecsvm_system_desc_t desc;
+        const char **before_names;
+        const char **after_names;
+        size_t before_count;
+        size_t after_count;
 
         function_ref = &module->function_refs[function_index];
         if (function_ref->body_blob_id == 0u ||
@@ -683,18 +1385,103 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
         }
 
         memset(&desc, 0, sizeof(desc));
+        before_names = NULL;
+        after_names = NULL;
+        before_count = 0u;
+        after_count = 0u;
+        if (!ecsvm_collect_function_dependencies(
+                module,
+                function_ref,
+                "core.Before",
+                &before_names,
+                &before_count
+            ) ||
+            !ecsvm_collect_function_dependencies(
+                module,
+                function_ref,
+                "core.After",
+                &after_names,
+                &after_count
+            )) {
+            fprintf(stderr, "out of memory while preparing managed system dependencies\n");
+            free(before_names);
+            free(after_names);
+            goto cleanup;
+        }
+
         bindings[system_count].runtime = &runtime;
         bindings[system_count].function_id = (uint32_t)function_index + 1u;
         desc.name = function_ref->qualified_name;
         desc.callback = ecsvm_managed_system_callback;
         desc.user_data = &bindings[system_count];
+        desc.before = before_names;
+        desc.before_count = before_count;
+        desc.after = after_names;
+        desc.after_count = after_count;
         status = ecsvm_engine_register_system(engine, &desc, NULL);
+        free(before_names);
+        free(after_names);
         if (status != ECSVM_OK) {
             fprintf(stderr, "failed to register managed system %s: %s\n", function_ref->qualified_name, ecsvm_status_string(status));
             goto cleanup;
         }
         system_count += 1u;
     }
+
+#if ECSVM_ENABLE_SDL3
+    if (ecsvm_module_references_system_dependency(module, "core.window") ||
+        ecsvm_module_references_system_dependency(module, "core.renderer")) {
+        ecsvm_window_config_t window_config;
+
+        memset(&window_config, 0, sizeof(window_config));
+        window_config.title = "ecsvm";
+        window_config.width = 960;
+        window_config.height = 540;
+        window_system = ecsvm_window_system_create(&window_config);
+        if (window_system == NULL) {
+            fprintf(stderr, "failed to create SDL window system\n");
+            goto cleanup;
+        }
+
+        status = ecsvm_window_system_register(engine, window_system);
+        if (status != ECSVM_OK) {
+            fprintf(stderr, "failed to register SDL window system: %s\n", ecsvm_status_string(status));
+            goto cleanup;
+        }
+    }
+
+    if (ecsvm_module_references_system_dependency(module, "core.renderer")) {
+        ecsvm_renderer_config_t renderer_config;
+
+        memset(&renderer_config, 0, sizeof(renderer_config));
+        renderer_config.components.hierarchy = ecsvm_engine_hierarchy_component(engine);
+        renderer_config.components.transform = ecsvm_engine_find_component(engine, "core.Transform");
+        renderer_config.components.time = ecsvm_engine_find_component(engine, "core.Time");
+        renderer_config.components.graphics_shape = ecsvm_engine_find_component(engine, "core.graphics.GraphicsShape");
+        renderer_config.clear_color.x = 0.05f;
+        renderer_config.clear_color.y = 0.05f;
+        renderer_config.clear_color.z = 0.08f;
+        renderer_config.clear_color.w = 1.0f;
+        if (window_system == NULL ||
+            renderer_config.components.transform == ECSVM_INVALID_COMPONENT ||
+            renderer_config.components.graphics_shape == ECSVM_INVALID_COMPONENT) {
+            fprintf(stderr, "failed to prepare SDL renderer system\n");
+            goto cleanup;
+        }
+
+        renderer_system = ecsvm_renderer_system_create(window_system, &renderer_config);
+        if (renderer_system == NULL) {
+            fprintf(stderr, "failed to create SDL renderer system\n");
+            goto cleanup;
+        }
+
+        status = ecsvm_renderer_system_register(engine, renderer_system);
+        if (status != ECSVM_OK) {
+            fprintf(stderr, "failed to register SDL renderer system: %s\n", ecsvm_status_string(status));
+            goto cleanup;
+        }
+    }
+#endif
 
     status = ecsvm_engine_run(engine);
     if (status != ECSVM_OK) {
@@ -706,6 +1493,10 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
 
 cleanup:
     free(bindings);
+#if ECSVM_ENABLE_SDL3
+    ecsvm_renderer_system_destroy(renderer_system);
+    ecsvm_window_system_destroy(window_system);
+#endif
     ecsvm_engine_destroy(engine);
     return exit_code;
 }

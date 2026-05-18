@@ -330,6 +330,9 @@ static int run_self_test(void)
         return 1;
     }
 
+    memset(&gravity_desc, 0, sizeof(gravity_desc));
+    memset(&integrate_desc, 0, sizeof(integrate_desc));
+
     gravity_desc.name = "app.gravity";
     gravity_desc.callback = demo_gravity;
     gravity_desc.alloc = NULL;

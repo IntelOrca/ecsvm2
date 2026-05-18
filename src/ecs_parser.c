@@ -571,17 +571,37 @@ static int ecsvm_parser_parse_postfix_expression(
 
         if (ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_LPAREN ||
             ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_LT) {
-            size_t open_paren_index;
+            size_t type_argument_index;
+            size_t type_start;
+            size_t type_end;
             size_t argument_list_index;
             size_t call_index;
-            size_t saved_index;
+            int has_type_argument;
 
-            saved_index = parser->index;
+            type_argument_index = 0u;
+            type_start = 0u;
+            type_end = 0u;
+            has_type_argument = 0;
             if (ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_LT) {
-                if (!ecsvm_parser_find_generic_call_open(parser, &open_paren_index)) {
+                if (!ecsvm_parser_find_generic_call_open(parser, &argument_list_index)) {
                     break;
                 }
-                parser->index = open_paren_index;
+                parser->index += 1u;
+                if (!ecsvm_parser_parse_type_expression(
+                        parser,
+                        nodes,
+                        &type_start,
+                        &type_end,
+                        &type_argument_index,
+                        error_message,
+                        error_message_capacity
+                    ) ||
+                    !ecsvm_parser_expect(parser, ECSVM_TOKEN_GT, error_message, error_message_capacity)) {
+                    return 0;
+                }
+                (void)type_start;
+                (void)type_end;
+                has_type_argument = 1;
             }
 
             if (!ecsvm_parser_parse_argument_list(
@@ -603,12 +623,12 @@ static int ecsvm_parser_parse_postfix_expression(
             }
 
             ecsvm_syntax_node_add_child(nodes, call_index, expression_index);
+            if (has_type_argument) {
+                ecsvm_syntax_node_add_child(nodes, call_index, type_argument_index);
+            }
             ecsvm_syntax_node_add_child(nodes, call_index, argument_list_index);
             nodes->items[call_index].token_end = nodes->items[argument_list_index].token_end;
             expression_index = call_index;
-            if (saved_index != parser->index) {
-                continue;
-            }
             continue;
         }
 
@@ -1925,6 +1945,19 @@ static int ecsvm_parser_parse_attribute(
         return 0;
     }
 
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_LT)) {
+        if (!ecsvm_parser_parse_qualified_name(
+                parser,
+                &attribute.type_start,
+                &attribute.type_end,
+                error_message,
+                error_message_capacity
+            ) ||
+            !ecsvm_parser_expect(parser, ECSVM_TOKEN_GT, error_message, error_message_capacity)) {
+            return 0;
+        }
+    }
+
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_LPAREN)) {
         size_t value_index;
         size_t value_start;
@@ -2046,6 +2079,81 @@ static int ecsvm_parser_parse_declaration(
                 )) {
                 return 0;
             }
+        } else if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_FN) ||
+                   ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_SYSTEM)) {
+            size_t block_index;
+            ecsvm_syntax_kind_t function_kind;
+
+            function_kind = parser->file->tokens.items[parser->index - 1u].kind == ECSVM_TOKEN_KEY_FN
+                ? ECSVM_SYNTAX_FUNCTION
+                : ECSVM_SYNTAX_SYSTEM;
+            nodes->items[struct_index].kind = function_kind;
+
+            if (!ecsvm_parser_parse_identifier(
+                    parser,
+                    &nodes->items[struct_index].name_start,
+                    &nodes->items[struct_index].name_end,
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+
+            if (function_kind == ECSVM_SYNTAX_FUNCTION || ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_LPAREN) {
+                if (!ecsvm_parser_parse_parameter_list(
+                        parser,
+                        nodes,
+                        struct_index,
+                        error_message,
+                        error_message_capacity
+                    )) {
+                    return 0;
+                }
+            }
+
+            if (function_kind == ECSVM_SYNTAX_FUNCTION && ecsvm_parser_match(parser, ECSVM_TOKEN_COLON)) {
+                if (!ecsvm_parser_parse_type_expression(
+                        parser,
+                        nodes,
+                        &nodes->items[struct_index].type_start,
+                        &nodes->items[struct_index].type_end,
+                        &block_index,
+                        error_message,
+                        error_message_capacity
+                    )) {
+                    return 0;
+                }
+                ecsvm_syntax_node_add_child(nodes, struct_index, block_index);
+            }
+
+            if (ecsvm_parser_match(parser, ECSVM_TOKEN_SEMICOLON)) {
+                nodes->items[struct_index].token_end = parser->index - 1u;
+                ecsvm_syntax_node_add_child(nodes, parent_index, struct_index);
+                return 1;
+            }
+
+            if (ecsvm_parser_current(parser)->kind != ECSVM_TOKEN_LBRACE) {
+                ecsvm_set_error(error_message, error_message_capacity, "expected block");
+                return 0;
+            }
+
+            if (!ecsvm_parser_parse_block(
+                    parser,
+                    nodes,
+                    &block_index,
+                    error_message,
+                    error_message_capacity
+                )) {
+                return 0;
+            }
+
+            nodes->items[struct_index].body_start = nodes->items[block_index].token_start;
+            nodes->items[struct_index].body_end = nodes->items[block_index].token_end;
+            nodes->items[struct_index].has_body = 1;
+            nodes->items[struct_index].token_end = nodes->items[block_index].token_end;
+            ecsvm_syntax_node_add_child(nodes, struct_index, block_index);
+            ecsvm_syntax_node_add_child(nodes, parent_index, struct_index);
+            return 1;
         } else if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_KEY_STRUCT, error_message, error_message_capacity)) {
             return 0;
         }

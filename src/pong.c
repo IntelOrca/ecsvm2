@@ -388,7 +388,7 @@ static ecsvm_status_t pong_register_loaded_components(
     status = pong_bind_loaded_component(
         engine,
         module,
-        "core.transform",
+        "core.Transform",
         sizeof(ecsvm_transform_component_t),
         &state->core.transform
     );
@@ -399,7 +399,7 @@ static ecsvm_status_t pong_register_loaded_components(
     status = pong_bind_loaded_component(
         engine,
         module,
-        "core.graphics_shape",
+        "core.graphics.GraphicsShape",
         sizeof(ecsvm_graphics_shape_component_t),
         &state->core.graphics_shape
     );
@@ -410,7 +410,7 @@ static ecsvm_status_t pong_register_loaded_components(
     status = pong_bind_loaded_component(
         engine,
         module,
-        "pong.paddle",
+        "pong.Paddle",
         sizeof(pong_paddle_component_t),
         &state->paddle_component
     );
@@ -421,7 +421,7 @@ static ecsvm_status_t pong_register_loaded_components(
     return pong_bind_loaded_component(
         engine,
         module,
-        "pong.velocity",
+        "pong.Velocity",
         sizeof(pong_velocity_component_t),
         &state->velocity_component
     );

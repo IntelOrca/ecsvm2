@@ -485,6 +485,7 @@ static int ecsvm_import_function_attributes(
         const ecsvm_ecsbin_attribute_t *attribute;
         const ecsvm_ecsbin_type_ref_t *type_ref;
         char *attribute_name;
+        char *attribute_data;
 
         attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
         type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
@@ -494,9 +495,13 @@ static int ecsvm_import_function_attributes(
         }
 
         attribute_name = ecsvm_copy_string(type_ref->qualified_name);
+        attribute_data = attribute != NULL && attribute->data != NULL && attribute->data[0] != '\0'
+            ? ecsvm_copy_string(attribute->data)
+            : NULL;
         if (attribute_name == NULL ||
-            !ecsvm_semantic_function_attribute_push(semantic_function, attribute_name)) {
+            !ecsvm_semantic_function_attribute_push(semantic_function, attribute_name, attribute_data)) {
             free(attribute_name);
+            free(attribute_data);
             ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library function attributes");
             return 0;
         }

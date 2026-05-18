@@ -22,10 +22,12 @@ COMMON_SRCS := \
 	src/logger.c \
 	src/managed_runtime.c \
 	src/main.c \
+	src/pipeline.c \
 	src/pong.c \
 	src/project.c \
 	src/project_common.c \
 	src/stream.c \
+	src/system_time.c \
 	src/xml.c
 
 COMMON_OBJS := $(COMMON_SRCS:src/%.c=$(OBJ_DIR)/%.o)

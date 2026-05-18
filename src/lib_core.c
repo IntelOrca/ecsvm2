@@ -16,6 +16,14 @@ static ecsvm_managed_value_t ecsvm_managed_void_value(void)
     return value;
 }
 
+static ecsvm_managed_value_t ecsvm_managed_null_value(void)
+{
+    ecsvm_managed_value_t value;
+    memset(&value, 0, sizeof(value));
+    value.kind = ECSVM_MANAGED_VALUE_NULL;
+    return value;
+}
+
 static int ecsvm_managed_number_argument(
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
@@ -78,6 +86,7 @@ static ecsvm_status_t ecsvm_core_print(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -85,6 +94,7 @@ static ecsvm_status_t ecsvm_core_print(
 {
     (void)engine;
     (void)function_ref;
+    (void)type_argument_id;
 
     if (module == NULL || out_value == NULL || argument_count != 1u) {
         return ECSVM_ERROR_ARGUMENT;
@@ -99,6 +109,7 @@ static ecsvm_status_t ecsvm_core_stop(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -106,6 +117,7 @@ static ecsvm_status_t ecsvm_core_stop(
 {
     (void)module;
     (void)function_ref;
+    (void)type_argument_id;
     (void)arguments;
 
     if (engine == NULL || out_value == NULL || argument_count != 0u) {
@@ -121,6 +133,7 @@ static ecsvm_status_t ecsvm_core_math_min(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -132,6 +145,7 @@ static ecsvm_status_t ecsvm_core_math_min(
     (void)engine;
     (void)module;
     (void)function_ref;
+    (void)type_argument_id;
 
     if (out_value == NULL ||
         argument_count != 2u ||
@@ -149,6 +163,7 @@ static ecsvm_status_t ecsvm_core_math_max(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -160,6 +175,7 @@ static ecsvm_status_t ecsvm_core_math_max(
     (void)engine;
     (void)module;
     (void)function_ref;
+    (void)type_argument_id;
 
     if (out_value == NULL ||
         argument_count != 2u ||
@@ -177,6 +193,7 @@ static ecsvm_status_t ecsvm_core_math_clamp(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -189,6 +206,7 @@ static ecsvm_status_t ecsvm_core_math_clamp(
     (void)engine;
     (void)module;
     (void)function_ref;
+    (void)type_argument_id;
 
     if (out_value == NULL ||
         argument_count != 3u ||
@@ -210,11 +228,98 @@ static ecsvm_status_t ecsvm_core_math_clamp(
     return ECSVM_OK;
 }
 
+static ecsvm_status_t ecsvm_core_spawn(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
+    const ecsvm_managed_value_t *arguments,
+    size_t argument_count,
+    ecsvm_managed_value_t *out_value
+)
+{
+    ecsvm_entity_t entity;
+
+    (void)module;
+    (void)function_ref;
+    (void)type_argument_id;
+    (void)arguments;
+
+    if (engine == NULL || out_value == NULL || argument_count != 0u) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    entity = ecsvm_entity_create(engine);
+    if (entity == ECSVM_INVALID_ENTITY) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
+    out_value->number_value = (double)entity;
+    return ECSVM_OK;
+}
+
+static ecsvm_status_t ecsvm_core_get_first_entity(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
+    const ecsvm_managed_value_t *arguments,
+    size_t argument_count,
+    ecsvm_managed_value_t *out_value
+)
+{
+    const ecsvm_ecsbin_type_ref_t *type_ref;
+    ecsvm_component_id_t component_id;
+    size_t index;
+
+    (void)function_ref;
+    (void)arguments;
+
+    if (engine == NULL ||
+        module == NULL ||
+        out_value == NULL ||
+        argument_count != 0u ||
+        type_argument_id == 0u) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    type_ref = ecsvm_ecsbin_type_ref(module, type_argument_id);
+    if (type_ref == NULL || type_ref->qualified_name == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    component_id = ecsvm_engine_find_component(engine, type_ref->qualified_name);
+    if (component_id == ECSVM_INVALID_COMPONENT) {
+        *out_value = ecsvm_managed_null_value();
+        return ECSVM_OK;
+    }
+
+    for (index = 0u; index < ecsvm_entity_count(engine); ++index) {
+        ecsvm_entity_t entity;
+
+        entity = ecsvm_entity_at(engine, index);
+        if (entity != ECSVM_INVALID_ENTITY &&
+            ecsvm_component_has(engine, component_id, entity)) {
+            out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
+            out_value->number_value = (double)entity;
+            return ECSVM_OK;
+        }
+    }
+
+    *out_value = ecsvm_managed_null_value();
+    return ECSVM_OK;
+}
+
 ecsvm_native_function_fn ecsvm_core_find_native_function(const char *qualified_name)
 {
     static const ecsvm_native_binding_t bindings[] = {
         { "core.Print", ecsvm_core_print },
+        { "core.print", ecsvm_core_print },
         { "core.Stop", ecsvm_core_stop },
+        { "core.stop", ecsvm_core_stop },
+        { "core.spawn", ecsvm_core_spawn },
+        { "core.getFirstEntity", ecsvm_core_get_first_entity },
         { "core.math.min", ecsvm_core_math_min },
         { "core.math.max", ecsvm_core_math_max },
         { "core.math.clamp", ecsvm_core_math_clamp }

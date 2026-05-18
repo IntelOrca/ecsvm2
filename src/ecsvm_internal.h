@@ -12,7 +12,8 @@ typedef enum ecsvm_managed_value_kind {
     ECSVM_MANAGED_VALUE_NULL,
     ECSVM_MANAGED_VALUE_BOOL,
     ECSVM_MANAGED_VALUE_NUMBER,
-    ECSVM_MANAGED_VALUE_STRING
+    ECSVM_MANAGED_VALUE_STRING,
+    ECSVM_MANAGED_VALUE_REFERENCE
 } ecsvm_managed_value_kind_t;
 
 typedef struct ecsvm_managed_value {
@@ -20,12 +21,15 @@ typedef struct ecsvm_managed_value {
     int boolean_value;
     double number_value;
     uint32_t blob_id;
+    uint32_t type_id;
+    void *reference_value;
 } ecsvm_managed_value_t;
 
 typedef ecsvm_status_t (*ecsvm_native_function_fn)(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
     const ecsvm_managed_value_t *arguments,
     size_t argument_count,
     ecsvm_managed_value_t *out_value
@@ -38,7 +42,23 @@ typedef struct ecsvm_function_entry {
     int has_managed_body;
 } ecsvm_function_entry_t;
 
+typedef struct ecsvm_system_entry {
+    char *name;
+    ecsvm_system_fn callback;
+    ecsvm_system_api_t api;
+    char **before;
+    size_t before_count;
+    char **after;
+    size_t after_count;
+} ecsvm_system_entry_t;
+
 ecsvm_native_function_fn ecsvm_core_find_native_function(const char *qualified_name);
+ecsvm_status_t ecsvm_pipeline_build(
+    const ecsvm_system_entry_t *systems,
+    size_t system_count,
+    size_t **out_order,
+    size_t *out_count
+);
 
 ecsvm_status_t ecsvm_engine_load_functions(
     ecsvm_engine_t *engine,

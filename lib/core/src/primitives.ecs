@@ -8,6 +8,9 @@ namespace core {
     [Alias("u32")]
     struct UInt32;
 
+    [Alias("u64")]
+    struct UInt64;
+
     [Alias("f32")]
     struct Float32;
 

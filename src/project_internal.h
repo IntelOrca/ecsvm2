@@ -254,6 +254,7 @@ typedef struct ecsvm_semantic_function {
     size_t parameter_count;
     size_t parameter_capacity;
     char **attributes;
+    char **attribute_data;
     size_t attribute_count;
     size_t attribute_capacity;
     char *return_type_name;
@@ -479,7 +480,7 @@ int ecsvm_semantic_struct_array_push(ecsvm_semantic_struct_array_t *array, ecsvm
 void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct);
 void ecsvm_semantic_struct_array_free(ecsvm_semantic_struct_array_t *array);
 int ecsvm_semantic_function_parameter_push(ecsvm_semantic_function_t *function, ecsvm_semantic_parameter_t parameter);
-int ecsvm_semantic_function_attribute_push(ecsvm_semantic_function_t *function, char *attribute_name);
+int ecsvm_semantic_function_attribute_push(ecsvm_semantic_function_t *function, char *attribute_name, char *attribute_data);
 int ecsvm_semantic_function_array_push(ecsvm_semantic_function_array_t *array, ecsvm_semantic_function_t function);
 void ecsvm_semantic_parameter_free(ecsvm_semantic_parameter_t *parameter);
 void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function);

@@ -6,7 +6,7 @@ namespace core {
     fn spawn(): entity;
     fn getFirstEntity(): entity;
 
-    system time();
-    system window();
-    system renderer();
+    system Time();
+    system Window();
+    system Renderer();
 }

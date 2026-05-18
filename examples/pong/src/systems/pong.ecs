@@ -69,9 +69,9 @@ namespace pong {
         velocity.value.y = 420.0 * 0.35;
     }
 
-    [After<core.time>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(core.Time)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system Bootstrap {
         if (getFirstEntity<GameState>() != null) {
             return;
@@ -146,10 +146,10 @@ namespace pong {
         print("pong.bootstrap");
     }
 
-    [After<core.time>]
-    [After<pong.Bootstrap>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(core.Time)]
+    [After(pong.Bootstrap)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system UpdateTickState {
         let time_entity: entity = getFirstEntity<Time>();
         let tick_state_entity: entity = getFirstEntity<TickState>();
@@ -187,9 +187,9 @@ namespace pong {
         }
     }
 
-    [After<pong.UpdateTickState>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(pong.UpdateTickState)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system TrackPaddles {
         let game_state_entity: entity = getFirstEntity<GameState>();
         let tick_state_entity: entity = getFirstEntity<TickState>();
@@ -227,9 +227,9 @@ namespace pong {
         );
     }
 
-    [After<pong.TrackPaddles>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(pong.TrackPaddles)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system MoveBall {
         let game_state_entity: entity = getFirstEntity<GameState>();
         let tick_state_entity: entity = getFirstEntity<TickState>();
@@ -256,9 +256,9 @@ namespace pong {
         ball.rotation = ball.rotation + (2.5 * tick.delta_seconds);
     }
 
-    [After<pong.MoveBall>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(pong.MoveBall)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system BounceBall {
         let game_state_entity: entity = getFirstEntity<GameState>();
         let tick_state_entity: entity = getFirstEntity<TickState>();
@@ -303,9 +303,9 @@ namespace pong {
         }
     }
 
-    [After<pong.BounceBall>]
-    [Before<core.window>]
-    [Before<core.renderer>]
+    [After(pong.BounceBall)]
+    [Before(core.Window)]
+    [Before(core.Renderer)]
     system ScoreBall {
         let game_state_entity: entity = getFirstEntity<GameState>();
         let tick_state_entity: entity = getFirstEntity<TickState>();

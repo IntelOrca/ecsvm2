@@ -421,6 +421,11 @@ static int ecsvm_project_find_semantic_function(
     return -1;
 }
 
+static char *ecsvm_import_attribute_data(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+);
+
 static int ecsvm_import_struct_attributes(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_struct_def_t *definition,
@@ -445,10 +450,9 @@ static int ecsvm_import_struct_attributes(
         }
 
         attribute_name = ecsvm_copy_string(type_ref->qualified_name);
-        attribute_data = attribute->data != NULL && attribute->data[0] != '\0'
-            ? ecsvm_copy_string(attribute->data)
-            : NULL;
+        attribute_data = ecsvm_import_attribute_data(module, attribute);
         if (attribute_name == NULL ||
+            (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute) && attribute_data == NULL) ||
             !ecsvm_semantic_attribute_push(semantic_struct, attribute_name, attribute_data)) {
             free(attribute_name);
             free(attribute_data);
@@ -464,6 +468,34 @@ static int ecsvm_import_struct_attributes(
     }
 
     return 1;
+}
+
+static char *ecsvm_import_attribute_data(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+)
+{
+    uint32_t payload_type_id;
+    const ecsvm_ecsbin_type_ref_t *payload_type;
+
+    if (attribute == NULL) {
+        return NULL;
+    }
+
+    if (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute)) {
+        if (!ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+            return NULL;
+        }
+
+        payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+        return payload_type != NULL && payload_type->qualified_name != NULL
+            ? ecsvm_copy_string(payload_type->qualified_name)
+            : NULL;
+    }
+
+    return attribute->data != NULL && attribute->data[0] != '\0'
+        ? ecsvm_copy_string(attribute->data)
+        : NULL;
 }
 
 static int ecsvm_import_function_attributes(
@@ -495,10 +527,9 @@ static int ecsvm_import_function_attributes(
         }
 
         attribute_name = ecsvm_copy_string(type_ref->qualified_name);
-        attribute_data = attribute != NULL && attribute->data != NULL && attribute->data[0] != '\0'
-            ? ecsvm_copy_string(attribute->data)
-            : NULL;
+        attribute_data = ecsvm_import_attribute_data(module, attribute);
         if (attribute_name == NULL ||
+            (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute) && attribute_data == NULL) ||
             !ecsvm_semantic_function_attribute_push(semantic_function, attribute_name, attribute_data)) {
             free(attribute_name);
             free(attribute_data);

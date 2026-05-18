@@ -189,6 +189,34 @@ static size_t ecsvm_max_size(size_t left, size_t right)
     return left > right ? left : right;
 }
 
+static const char *ecsvm_attribute_data_display(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+)
+{
+    uint32_t payload_type_id;
+    const ecsvm_ecsbin_type_ref_t *payload_type;
+    const ecsvm_ecsbin_blob_t *blob;
+
+    if (module == NULL || attribute == NULL) {
+        return "<invalid>";
+    }
+
+    if (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute)) {
+        if (!ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+            return "<invalid>";
+        }
+
+        payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+        return payload_type != NULL && payload_type->qualified_name != NULL
+            ? payload_type->qualified_name
+            : "<invalid>";
+    }
+
+    blob = ecsvm_ecsbin_blob_ref(module, attribute->data_blob_id);
+    return ecsvm_blob_preview(blob);
+}
+
 ecsvm_status_t ecsvm_ecsbin_inspect_module(
     const ecsvm_ecsbin_module_t *module,
     char **out_text,
@@ -335,9 +363,9 @@ ecsvm_status_t ecsvm_ecsbin_inspect_module(
     {
         ecsvm_table_column_t cols[3] = { {"Index",5u,1}, {"Type",4u,0}, {"Data",4u,0} };
         const char *cells[3]; char index_buf[32];
-        for (index = 0u; index < module->attribute_count; ++index) { const ecsvm_ecsbin_type_ref_t *type_ref = ecsvm_ecsbin_type_ref(module, module->attributes[index].type_id); (void)snprintf(index_buf, sizeof(index_buf), "%zu", index + 1u); cols[0].width = ecsvm_max_size(cols[0].width, strlen(index_buf)); cols[1].width = ecsvm_max_size(cols[1].width, strlen(type_ref != NULL ? type_ref->qualified_name : "<invalid>")); cols[2].width = ecsvm_max_size(cols[2].width, strlen(module->attributes[index].data)); }
+        for (index = 0u; index < module->attribute_count; ++index) { const ecsvm_ecsbin_type_ref_t *type_ref = ecsvm_ecsbin_type_ref(module, module->attributes[index].type_id); const char *data_text = ecsvm_attribute_data_display(module, &module->attributes[index]); (void)snprintf(index_buf, sizeof(index_buf), "%zu", index + 1u); cols[0].width = ecsvm_max_size(cols[0].width, strlen(index_buf)); cols[1].width = ecsvm_max_size(cols[1].width, strlen(type_ref != NULL ? type_ref->qualified_name : "<invalid>")); cols[2].width = ecsvm_max_size(cols[2].width, strlen(data_text)); }
         ECSVM_SIMPLE_TABLE_START("Attributes"); cells[0]=cols[0].header; cells[1]=cols[1].header; cells[2]=cols[2].header; ECSVM_APPEND_ROW(cols,3u,cells); ECSVM_APPEND_SEP(cols,3u);
-        for (index = 0u; index < module->attribute_count; ++index) { const ecsvm_ecsbin_type_ref_t *type_ref = ecsvm_ecsbin_type_ref(module, module->attributes[index].type_id); (void)snprintf(index_buf, sizeof(index_buf), "%zu", index + 1u); cells[0]=index_buf; cells[1]=type_ref != NULL ? type_ref->qualified_name : "<invalid>"; cells[2]=module->attributes[index].data; ECSVM_APPEND_ROW(cols,3u,cells);} ECSVM_APPEND_TEXT("\n");
+        for (index = 0u; index < module->attribute_count; ++index) { const ecsvm_ecsbin_type_ref_t *type_ref = ecsvm_ecsbin_type_ref(module, module->attributes[index].type_id); (void)snprintf(index_buf, sizeof(index_buf), "%zu", index + 1u); cells[0]=index_buf; cells[1]=type_ref != NULL ? type_ref->qualified_name : "<invalid>"; cells[2]=ecsvm_attribute_data_display(module, &module->attributes[index]); ECSVM_APPEND_ROW(cols,3u,cells);} ECSVM_APPEND_TEXT("\n");
     }
 
     {

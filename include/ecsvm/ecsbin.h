@@ -53,6 +53,7 @@ typedef struct ecsvm_ecsbin_parameter {
 
 typedef struct ecsvm_ecsbin_attribute {
     uint32_t type_id;
+    uint32_t data_blob_id;
     char *data;
 } ecsvm_ecsbin_attribute_t;
 
@@ -144,6 +145,17 @@ const char *ecsvm_ecsbin_function_attribute_data(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
     const char *qualified_name
+);
+
+int ecsvm_ecsbin_attribute_expects_type_payload(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+);
+
+int ecsvm_ecsbin_attribute_type_payload(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute,
+    uint32_t *out_type_id
 );
 
 ecsvm_status_t ecsvm_ecsbin_decompile_function_body(

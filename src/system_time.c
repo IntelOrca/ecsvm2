@@ -113,7 +113,7 @@ ecsvm_status_t ecsvm_time_system_register(
     }
 
     memset(&desc, 0, sizeof(desc));
-    desc.name = "core.time";
+    desc.name = "core.Time";
     desc.callback = ecsvm_time_system_tick;
     desc.user_data = system;
     return ecsvm_engine_register_system(engine, &desc, NULL);

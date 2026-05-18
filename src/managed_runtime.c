@@ -1149,6 +1149,22 @@ static ecsvm_status_t ecsvm_managed_system_callback(ecsvm_context_t *ctx)
     );
 }
 
+static const char *ecsvm_attribute_dependency_name(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+)
+{
+    uint32_t payload_type_id;
+    const ecsvm_ecsbin_type_ref_t *payload_type;
+
+    if (!ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+        return NULL;
+    }
+
+    payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+    return payload_type != NULL ? payload_type->qualified_name : NULL;
+}
+
 static size_t ecsvm_function_dependency_count(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_function_ref_t *function_ref,
@@ -1166,14 +1182,14 @@ static size_t ecsvm_function_dependency_count(
     for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
         const ecsvm_ecsbin_attribute_t *attribute;
         const ecsvm_ecsbin_type_ref_t *type_ref;
+        const char *dependency_name;
 
         attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
         type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        dependency_name = ecsvm_attribute_dependency_name(module, attribute);
         if (type_ref == NULL ||
             type_ref->qualified_name == NULL ||
-            attribute == NULL ||
-            attribute->data == NULL ||
-            attribute->data[0] == '\0') {
+            dependency_name == NULL) {
             continue;
         }
         if (strcmp(type_ref->qualified_name, attribute_name) == 0) {
@@ -1212,19 +1228,19 @@ static int ecsvm_collect_function_dependencies(
     for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
         const ecsvm_ecsbin_attribute_t *attribute;
         const ecsvm_ecsbin_type_ref_t *type_ref;
+        const char *dependency_name;
 
         attribute = ecsvm_ecsbin_attribute_ref(module, function_ref->attribute_start + (uint32_t)attribute_index);
         type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
+        dependency_name = ecsvm_attribute_dependency_name(module, attribute);
         if (type_ref == NULL ||
             type_ref->qualified_name == NULL ||
-            attribute == NULL ||
-            attribute->data == NULL ||
-            attribute->data[0] == '\0' ||
+            dependency_name == NULL ||
             strcmp(type_ref->qualified_name, attribute_name) != 0) {
             continue;
         }
 
-        names[write_index] = attribute->data;
+        names[write_index] = dependency_name;
         write_index += 1u;
     }
 
@@ -1253,21 +1269,22 @@ static int ecsvm_module_references_system_dependency(
         for (attribute_index = 1u; attribute_index < function_ref->attribute_count; ++attribute_index) {
             const ecsvm_ecsbin_attribute_t *attribute;
             const ecsvm_ecsbin_type_ref_t *type_ref;
+            const char *dependency_name;
 
             attribute = ecsvm_ecsbin_attribute_ref(
                 module,
                 function_ref->attribute_start + (uint32_t)attribute_index
             );
             type_ref = attribute != NULL ? ecsvm_ecsbin_type_ref(module, attribute->type_id) : NULL;
-            if (attribute == NULL ||
-                attribute->data == NULL ||
-                type_ref == NULL ||
-                type_ref->qualified_name == NULL) {
+            dependency_name = ecsvm_attribute_dependency_name(module, attribute);
+            if (type_ref == NULL ||
+                type_ref->qualified_name == NULL ||
+                dependency_name == NULL) {
                 continue;
             }
             if ((strcmp(type_ref->qualified_name, "core.Before") == 0 ||
                  strcmp(type_ref->qualified_name, "core.After") == 0) &&
-                strcmp(attribute->data, system_name) == 0) {
+                strcmp(dependency_name, system_name) == 0) {
                 return 1;
             }
         }
@@ -1429,8 +1446,8 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     }
 
 #if ECSVM_ENABLE_SDL3
-    if (ecsvm_module_references_system_dependency(module, "core.window") ||
-        ecsvm_module_references_system_dependency(module, "core.renderer")) {
+    if (ecsvm_module_references_system_dependency(module, "core.Window") ||
+        ecsvm_module_references_system_dependency(module, "core.Renderer")) {
         ecsvm_window_config_t window_config;
 
         memset(&window_config, 0, sizeof(window_config));
@@ -1450,7 +1467,7 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
         }
     }
 
-    if (ecsvm_module_references_system_dependency(module, "core.renderer")) {
+    if (ecsvm_module_references_system_dependency(module, "core.Renderer")) {
         ecsvm_renderer_config_t renderer_config;
 
         memset(&renderer_config, 0, sizeof(renderer_config));

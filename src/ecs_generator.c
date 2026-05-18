@@ -293,7 +293,10 @@ static size_t ecsvm_builtin_layout(const char *qualified_name, size_t *out_align
 
     size = 0u;
     alignment = 0u;
-    if (strcmp(qualified_name, "core.Entity") == 0) {
+    if (strcmp(qualified_name, "core.Type") == 0) {
+        size = sizeof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
+    } else if (strcmp(qualified_name, "core.Entity") == 0) {
         size = sizeof(uint32_t);
         alignment = ECSVM_ALIGNOF(uint32_t);
     } else if (strcmp(qualified_name, "core.Int32") == 0) {
@@ -508,6 +511,127 @@ static char *ecsvm_resolve_function_name(
     if (index >= 0) {
         return ecsvm_copy_string(semantic_functions->items[index].qualified_name);
     }
+    return ecsvm_copy_string(name);
+}
+
+static char *ecsvm_try_resolve_type_name(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *current_namespace,
+    const char *name
+)
+{
+    char *qualified_name;
+    int index;
+
+    qualified_name = ecsvm_find_type_alias_target(semantic_structs, name);
+    if (qualified_name != NULL) {
+        return qualified_name;
+    }
+
+    index = ecsvm_find_semantic_struct(semantic_structs, name);
+    if (index >= 0) {
+        return ecsvm_copy_string(semantic_structs->items[index].qualified_name);
+    }
+
+    if (strchr(name, '.') != NULL) {
+        index = ecsvm_find_semantic_struct_by_suffix(semantic_structs, name);
+        return index >= 0
+            ? ecsvm_copy_string(semantic_structs->items[index].qualified_name)
+            : NULL;
+    }
+
+    qualified_name = ecsvm_join_qualified_name(current_namespace, name);
+    if (qualified_name == NULL) {
+        return NULL;
+    }
+
+    index = ecsvm_find_semantic_struct(semantic_structs, qualified_name);
+    if (index >= 0) {
+        return qualified_name;
+    }
+
+    free(qualified_name);
+    index = ecsvm_find_semantic_struct_by_suffix(semantic_structs, name);
+    return index >= 0
+        ? ecsvm_copy_string(semantic_structs->items[index].qualified_name)
+        : NULL;
+}
+
+static char *ecsvm_try_resolve_function_name(
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *current_namespace,
+    const char *name
+)
+{
+    char *qualified_name;
+    int index;
+
+    index = ecsvm_find_semantic_function(semantic_functions, name);
+    if (index >= 0) {
+        return ecsvm_copy_string(semantic_functions->items[index].qualified_name);
+    }
+
+    if (strchr(name, '.') != NULL) {
+        index = ecsvm_find_semantic_function_by_suffix(semantic_functions, name);
+        return index >= 0
+            ? ecsvm_copy_string(semantic_functions->items[index].qualified_name)
+            : NULL;
+    }
+
+    qualified_name = ecsvm_join_qualified_name(current_namespace, name);
+    if (qualified_name == NULL) {
+        return NULL;
+    }
+
+    index = ecsvm_find_semantic_function(semantic_functions, qualified_name);
+    if (index >= 0) {
+        return qualified_name;
+    }
+
+    free(qualified_name);
+    index = ecsvm_find_semantic_function_by_suffix(semantic_functions, name);
+    return index >= 0
+        ? ecsvm_copy_string(semantic_functions->items[index].qualified_name)
+        : NULL;
+}
+
+static int ecsvm_attribute_uses_type_payload(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *attribute_name
+)
+{
+    int attribute_index;
+    const ecsvm_semantic_struct_t *attribute_struct;
+
+    attribute_index = ecsvm_find_semantic_struct(semantic_structs, attribute_name);
+    if (attribute_index < 0) {
+        return 0;
+    }
+
+    attribute_struct = &semantic_structs->items[attribute_index];
+    return attribute_struct->field_count == 1u &&
+        strcmp(attribute_struct->fields[0].type_name, "core.Type") == 0;
+}
+
+static char *ecsvm_resolve_type_payload_name(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const ecsvm_semantic_function_array_t *semantic_functions,
+    const char *current_namespace,
+    const char *name
+)
+{
+    char *resolved_name;
+
+    resolved_name = ecsvm_try_resolve_type_name(semantic_structs, current_namespace, name);
+    if (resolved_name != NULL) {
+        return resolved_name;
+    }
+
+    resolved_name = ecsvm_try_resolve_function_name(semantic_functions, current_namespace, name);
+    if (resolved_name != NULL) {
+        return resolved_name;
+    }
+
     return ecsvm_copy_string(name);
 }
 
@@ -870,6 +994,38 @@ int ecsvm_resolve_semantic_types(
         }
     }
 
+    for (struct_index = 0u; struct_index < semantic_structs->count; ++struct_index) {
+        ecsvm_semantic_struct_t *semantic_struct;
+        size_t attribute_index;
+
+        semantic_struct = &semantic_structs->items[struct_index];
+        for (attribute_index = 0u; attribute_index < semantic_struct->attribute_count; ++attribute_index) {
+            char *resolved_data;
+
+            if (semantic_struct->attribute_data[attribute_index] == NULL ||
+                !ecsvm_attribute_uses_type_payload(
+                    semantic_structs,
+                    semantic_struct->attributes[attribute_index]
+                )) {
+                continue;
+            }
+
+            resolved_data = ecsvm_resolve_type_payload_name(
+                semantic_structs,
+                semantic_functions,
+                semantic_struct->namespace_name,
+                semantic_struct->attribute_data[attribute_index]
+            );
+            if (resolved_data == NULL) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving attribute payloads");
+                return 0;
+            }
+
+            free(semantic_struct->attribute_data[attribute_index]);
+            semantic_struct->attribute_data[attribute_index] = resolved_data;
+        }
+    }
+
     for (struct_index = 0u; struct_index < semantic_functions->count; ++struct_index) {
         ecsvm_semantic_function_t *semantic_function;
         size_t parameter_index;
@@ -939,25 +1095,27 @@ int ecsvm_resolve_semantic_types(
         for (attribute_index = 0u; attribute_index < semantic_function->attribute_count; ++attribute_index) {
             char *resolved_data;
 
-            if (semantic_function->attribute_data[attribute_index] == NULL) {
+            if (semantic_function->attribute_data[attribute_index] == NULL ||
+                !ecsvm_attribute_uses_type_payload(
+                    semantic_structs,
+                    semantic_function->attributes[attribute_index]
+                )) {
                 continue;
             }
 
-            if (strcmp(semantic_function->attributes[attribute_index], "core.Before") == 0 ||
-                strcmp(semantic_function->attributes[attribute_index], "core.After") == 0) {
-                resolved_data = ecsvm_resolve_function_name(
-                    semantic_functions,
-                    semantic_function->namespace_name,
-                    semantic_function->attribute_data[attribute_index]
-                );
-                if (resolved_data == NULL) {
-                    ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving function attribute targets");
-                    return 0;
-                }
-
-                free(semantic_function->attribute_data[attribute_index]);
-                semantic_function->attribute_data[attribute_index] = resolved_data;
+            resolved_data = ecsvm_resolve_type_payload_name(
+                semantic_structs,
+                semantic_functions,
+                semantic_function->namespace_name,
+                semantic_function->attribute_data[attribute_index]
+            );
+            if (resolved_data == NULL) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving function attribute payloads");
+                return 0;
             }
+
+            free(semantic_function->attribute_data[attribute_index]);
+            semantic_function->attribute_data[attribute_index] = resolved_data;
         }
     }
 
@@ -1859,6 +2017,33 @@ static int ecsvm_serialize_function_ast_blob(
     return 1;
 }
 
+static uint32_t ecsvm_attribute_data_blob_id(
+    const ecsvm_semantic_struct_array_t *semantic_structs,
+    const char *attribute_name,
+    const char *attribute_data,
+    ecsvm_blob_array_t *blobs,
+    ecsvm_type_ref_builder_array_t *type_refs,
+    uint32_t empty_blob_id
+)
+{
+    uint32_t payload_type_id;
+
+    if (attribute_data == NULL) {
+        return empty_blob_id;
+    }
+
+    if (!ecsvm_attribute_uses_type_payload(semantic_structs, attribute_name)) {
+        return ecsvm_ensure_blob(blobs, attribute_data, strlen(attribute_data));
+    }
+
+    payload_type_id = ecsvm_ensure_type_ref(type_refs, blobs, attribute_data);
+    if (payload_type_id == 0u) {
+        return 0u;
+    }
+
+    return ecsvm_ensure_blob(blobs, &payload_type_id, sizeof(payload_type_id));
+}
+
 static const char *ecsvm_c_type_name(const char *qualified_name);
 
 int ecsvm_build_ecsbin_tables(
@@ -1908,13 +2093,14 @@ int ecsvm_build_ecsbin_tables(
                 blobs,
                 semantic_struct->attributes[attribute_index]
             );
-            attribute.data_blob_id = semantic_struct->attribute_data[attribute_index] == NULL
-                ? empty_blob_id
-                : ecsvm_ensure_blob(
-                    blobs,
-                    semantic_struct->attribute_data[attribute_index],
-                    strlen(semantic_struct->attribute_data[attribute_index])
-                );
+            attribute.data_blob_id = ecsvm_attribute_data_blob_id(
+                semantic_structs,
+                semantic_struct->attributes[attribute_index],
+                semantic_struct->attribute_data[attribute_index],
+                blobs,
+                type_refs,
+                empty_blob_id
+            );
             if (attribute.type_id == 0u ||
                 attribute.data_blob_id == 0u ||
                 !ecsvm_attribute_builder_array_push(attributes, attribute)) {
@@ -2024,13 +2210,14 @@ int ecsvm_build_ecsbin_tables(
                 blobs,
                 semantic_function->attributes[attribute_index]
             );
-            attribute.data_blob_id = semantic_function->attribute_data[attribute_index] == NULL
-                ? empty_blob_id
-                : ecsvm_ensure_blob(
-                    blobs,
-                    semantic_function->attribute_data[attribute_index],
-                    strlen(semantic_function->attribute_data[attribute_index])
-                );
+            attribute.data_blob_id = ecsvm_attribute_data_blob_id(
+                semantic_structs,
+                semantic_function->attributes[attribute_index],
+                semantic_function->attribute_data[attribute_index],
+                blobs,
+                type_refs,
+                empty_blob_id
+            );
             if (attribute.type_id == 0u ||
                 attribute.data_blob_id == 0u ||
                 !ecsvm_attribute_builder_array_push(attributes, attribute)) {
@@ -2293,6 +2480,9 @@ int ecsvm_write_ecsbin_file(
 
 static const char *ecsvm_c_type_name(const char *qualified_name)
 {
+    if (strcmp(qualified_name, "core.Type") == 0) {
+        return "uint32_t";
+    }
     if (strcmp(qualified_name, "core.Entity") == 0) {
         return "ecsvm_entity_t";
     }

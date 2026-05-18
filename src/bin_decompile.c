@@ -1387,10 +1387,29 @@ static ecsvm_status_t ecsvm_append_decompiled_struct(
             ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
             return ECSVM_ERROR_MEMORY;
         }
-        if (attribute->data != NULL && attribute->data[0] != '\0' &&
-            (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
-             !ecsvm_ecsbin_text_buffer_append(buffer, attribute->data) ||
-             !ecsvm_ecsbin_text_buffer_append_char(buffer, ')'))) {
+        if (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute)) {
+            uint32_t payload_type_id;
+            const ecsvm_ecsbin_type_ref_t *payload_type;
+
+            if (!ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "attribute payload is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+            if (payload_type == NULL ||
+                payload_type->qualified_name == NULL ||
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
+                !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(payload_type, current_namespace)) ||
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, ')')) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+                return ECSVM_ERROR_MEMORY;
+            }
+        } else if (attribute->data != NULL &&
+                   attribute->data[0] != '\0' &&
+                   (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
+                    !ecsvm_ecsbin_text_buffer_append(buffer, attribute->data) ||
+                    !ecsvm_ecsbin_text_buffer_append_char(buffer, ')'))) {
             ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
             return ECSVM_ERROR_MEMORY;
         }
@@ -1499,14 +1518,28 @@ static ecsvm_status_t ecsvm_append_decompiled_function(
             ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
             return ECSVM_ERROR_MEMORY;
         }
-        if (attribute->data != NULL && attribute->data[0] != '\0') {
-            const int use_type_parameter =
-                strcmp(attribute_type->qualified_name, "core.Before") == 0 ||
-                strcmp(attribute_type->qualified_name, "core.After") == 0;
+        if (ecsvm_ecsbin_attribute_expects_type_payload(module, attribute)) {
+            uint32_t payload_type_id;
+            const ecsvm_ecsbin_type_ref_t *payload_type;
 
-            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, use_type_parameter ? '<' : '(') ||
+            if (!ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "function attribute payload is invalid");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+            if (payload_type == NULL ||
+                payload_type->qualified_name == NULL ||
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
+                !ecsvm_ecsbin_text_buffer_append(buffer, ecsvm_display_type_name(payload_type, current_namespace)) ||
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, ')')) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
+                return ECSVM_ERROR_MEMORY;
+            }
+        } else if (attribute->data != NULL && attribute->data[0] != '\0') {
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '(') ||
                 !ecsvm_ecsbin_text_buffer_append(buffer, attribute->data) ||
-                !ecsvm_ecsbin_text_buffer_append_char(buffer, use_type_parameter ? '>' : ')')) {
+                !ecsvm_ecsbin_text_buffer_append_char(buffer, ')')) {
                 ecsvm_ecsbin_set_error(error_message, error_message_capacity, "out of memory while decompiling module");
                 return ECSVM_ERROR_MEMORY;
             }

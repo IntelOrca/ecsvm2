@@ -149,7 +149,10 @@ size_t ecsvm_ecsbin_builtin_layout(
         return 0u;
     }
 
-    if (strcmp(qualified_name, "core.Entity") == 0) {
+    if (strcmp(qualified_name, "core.Type") == 0) {
+        size = sizeof(uint32_t);
+        alignment = ECSVM_ALIGNOF(uint32_t);
+    } else if (strcmp(qualified_name, "core.Entity") == 0) {
         size = sizeof(ecsvm_entity_t);
         alignment = ECSVM_ALIGNOF(ecsvm_entity_t);
     } else if (strcmp(qualified_name, "core.Int32") == 0) {
@@ -413,11 +416,84 @@ const char *ecsvm_ecsbin_function_attribute_data(
         if (type_ref != NULL &&
             type_ref->qualified_name != NULL &&
             strcmp(type_ref->qualified_name, qualified_name) == 0) {
+            uint32_t payload_type_id;
+            const ecsvm_ecsbin_type_ref_t *payload_type;
+
+            if (ecsvm_ecsbin_attribute_type_payload(module, attribute, &payload_type_id)) {
+                payload_type = ecsvm_ecsbin_type_ref(module, payload_type_id);
+                return payload_type != NULL ? payload_type->qualified_name : NULL;
+            }
             return attribute != NULL ? attribute->data : NULL;
         }
     }
 
     return NULL;
+}
+
+int ecsvm_ecsbin_attribute_expects_type_payload(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute
+)
+{
+    int struct_index;
+    const ecsvm_ecsbin_struct_def_t *definition;
+    const ecsvm_ecsbin_field_ref_t *field_ref;
+    const ecsvm_ecsbin_type_ref_t *field_type;
+
+    if (module == NULL || attribute == NULL) {
+        return 0;
+    }
+
+    struct_index = ecsvm_ecsbin_find_struct_index_by_type(module, attribute->type_id);
+    if (struct_index < 0) {
+        return 0;
+    }
+
+    definition = &module->struct_defs[struct_index];
+    if (definition->field_count != 1u ||
+        definition->field_start == 0u ||
+        definition->field_start > module->field_ref_count) {
+        return 0;
+    }
+
+    field_ref = &module->field_refs[definition->field_start - 1u];
+    field_type = ecsvm_ecsbin_type_ref(module, field_ref->type_id);
+    return field_type != NULL &&
+        field_type->qualified_name != NULL &&
+        strcmp(field_type->qualified_name, "core.Type") == 0;
+}
+
+int ecsvm_ecsbin_attribute_type_payload(
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_attribute_t *attribute,
+    uint32_t *out_type_id
+)
+{
+    const ecsvm_ecsbin_blob_t *blob;
+    uint32_t type_id;
+
+    if (out_type_id != NULL) {
+        *out_type_id = 0u;
+    }
+    if (module == NULL ||
+        attribute == NULL ||
+        out_type_id == NULL ||
+        !ecsvm_ecsbin_attribute_expects_type_payload(module, attribute)) {
+        return 0;
+    }
+
+    blob = ecsvm_ecsbin_blob_ref(module, attribute->data_blob_id);
+    if (blob == NULL || blob->length != sizeof(type_id)) {
+        return 0;
+    }
+
+    memcpy(&type_id, blob->data, sizeof(type_id));
+    if (type_id == 0u || type_id > module->type_ref_count) {
+        return 0;
+    }
+
+    *out_type_id = type_id;
+    return 1;
 }
 
 
@@ -1171,12 +1247,15 @@ ecsvm_status_t ecsvm_ecsbin_load_ex(
 
         for (index = 0u; index < module.attribute_count; ++index) {
             module.attributes[index].type_id = disk_attributes[index].type_id;
+            module.attributes[index].data_blob_id = disk_attributes[index].data_blob_id;
             module.attributes[index].data = ecsvm_ecsbin_blob_string(
                 &module,
                 disk_attributes[index].data_blob_id
             );
             if (module.attributes[index].type_id == 0u ||
                 module.attributes[index].type_id > module.type_ref_count ||
+                module.attributes[index].data_blob_id == 0u ||
+                module.attributes[index].data_blob_id > module.blob_count ||
                 module.attributes[index].data == NULL) {
                 free(disk_attributes);
                 ecsvm_ecsbin_set_error(error_message, error_message_capacity, "attribute is invalid");

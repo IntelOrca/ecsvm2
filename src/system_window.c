@@ -184,7 +184,7 @@ ecsvm_status_t ecsvm_window_system_register(
     }
 
     memset(&desc, 0, sizeof(desc));
-    desc.name = "core.window";
+    desc.name = "core.Window";
     desc.callback = ecsvm_window_system_tick;
     desc.user_data = system;
     return ecsvm_engine_register_system(engine, &desc, NULL);

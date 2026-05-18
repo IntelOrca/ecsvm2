@@ -1,4 +1,6 @@
 namespace core {
+    struct Type;
+
     [Alias("entity")]
     struct Entity;
 

@@ -2,4 +2,5 @@ namespace core.math {
     fn min(a: f32, b: f32): f32;
     fn max(a: f32, b: f32): f32;
     fn clamp(value: f32, minimum: f32, maximum: f32): f32;
+    fn randomInt(minimum: i32, maximum: i32): i32;
 }

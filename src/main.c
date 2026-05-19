@@ -21,8 +21,6 @@ typedef struct demo_components {
 
 static demo_components_t g_demo_components;
 
-int ecsvm_run_pong(void);
-int ecsvm_run_pong_binary(const char *ecsbin_path);
 int ecsvm_run_ecsbin(const char *ecsbin_path);
 
 static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
@@ -117,7 +115,7 @@ static void print_usage(const char *argv0)
 {
     fprintf(
         stderr,
-        "usage: %s [--log-level error|warning|info|debug] --self-test | --pong | build [--core-lib <ecsbin>] <project> | run [--core-lib <ecsbin>] <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin> | parse <file.ecs>\n",
+        "usage: %s [--log-level error|warning|info|debug] --self-test | build [--core-lib <ecsbin>] <project> | run [--core-lib <ecsbin>] <project|ecsbin> | decompile <ecsbin> | inspect <ecsbin> | parse <file.ecs>\n",
         argv0
     );
 }
@@ -463,10 +461,6 @@ int main(int argc, char **argv)
 
     if (argc - argi == 1 && strcmp(argv[argi], "--self-test") == 0) {
         return run_self_test();
-    }
-
-    if (argc - argi == 1 && strcmp(argv[argi], "--pong") == 0) {
-        return ecsvm_run_pong();
     }
 
     if ((argc - argi == 2 || argc - argi == 4) && strcmp(argv[argi], "build") == 0) {

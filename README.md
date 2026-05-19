@@ -8,7 +8,7 @@ This repository currently contains:
 - a buildable runtime core with entities, components, systems, blobs/strings, and the built-in `core.*` components
 - a managed interpreter that executes `core.System` functions from `.ecsbin`
 - optional SDL3-backed native systems for windowing and shape rendering
-- a native C pong demo in `src/pong.c` when built with SDL3 enabled
+- a managed SDL3 pong example in `examples/pong`
 - a source-project frontend that builds `.ecs` declarations into `.ecsbin` plus generated `types.h`
 
 ## Build
@@ -18,7 +18,6 @@ make
 ./build/ecsvm --self-test
 ./build/ecsvm build --core-lib lib/core/out/core.ecsbin examples/interpreter
 ./build/ecsvm run --core-lib lib/core/out/core.ecsbin examples/interpreter
-./build/ecsvm --pong
 ./build/ecsvm build --core-lib lib/core/out/core.ecsbin examples/pong
 ./build/ecsvm run --core-lib lib/core/out/core.ecsbin examples/pong
 ./build/ecsvm decompile examples/pong/out/pong.ecsbin
@@ -32,27 +31,27 @@ make ECSVM_ENABLE_SDL3=0
 ./build/ecsvm --self-test
 ```
 
-When SDL3 is enabled, `--pong` and `run examples/pong` require SDL3 to be installed. If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building.
+When SDL3 is enabled, `run examples/pong` requires SDL3 to be installed. If SDL3 is installed in a non-standard prefix, set `SDL3_PREFIX` before building.
 
 ## Layout
 
 - `docs/` - language, runtime, package, and MVP specifications
 - `include/ecsvm/` - public C API
 - `src/` - runtime implementation and CLI entry point
-- `src/pong.c` - native pong demo using only the C runtime APIs
 - `lib/core/` - source for the build-time core library and its generated `out/core.ecsbin`
 - `Makefile` - Linux build entry point
 - `examples/basic/` - golden-path source project skeleton
 - `examples/interpreter/` - minimal managed-system sample that prints to stdout and stops
+- `examples/pong/` - SDL3-backed managed pong sample
 
 ## Current scope
 
-The current implementation covers phases 1-5 of the plan and adds a native SDL3 demo path:
+The current implementation covers phases 1-5 of the plan and adds SDL3-backed windowing/rendering for managed examples:
 - define the MVP boundaries
 - create the initial project skeleton
 - implement the runtime core
 - add a first `.ecs` frontend slice for component compilation and `.ecsbin` loading
 - execute managed `.ecs` systems through the runtime interpreter
-- exercise the runtime with a pong game built through native C systems and components
+- exercise the runtime with a pong game built through managed systems and native SDL3 support
 
 `.ecsar` loading and hot reload remain later phases.

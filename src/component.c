@@ -48,6 +48,22 @@ ecsvm_status_t ecsvm_register_core_components(
         return status;
     }
 
+    desc.name = "core.input.InputMonitor";
+    desc.size = sizeof(ecsvm_input_monitor_component_t);
+    desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
+    status = ecsvm_engine_register_component(engine, &desc, &components.input_monitor);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
+    desc.name = "core.ui.Window";
+    desc.size = sizeof(ecsvm_window_component_t);
+    desc.preferred_storage = ECSVM_STORAGE_CONTIGUOUS;
+    status = ecsvm_engine_register_component(engine, &desc, &components.window);
+    if (status != ECSVM_OK) {
+        return status;
+    }
+
     if (out_components != NULL) {
         *out_components = components;
     }

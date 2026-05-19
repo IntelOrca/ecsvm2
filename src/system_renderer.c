@@ -57,6 +57,56 @@ static bool renderer_draw_rectangle(
     return SDL_RenderGeometry(renderer, NULL, vertices, 4, indices, 6);
 }
 
+static bool renderer_draw_circle(
+    SDL_Renderer *renderer,
+    const ecsvm_transform_component_t *transform,
+    const ecsvm_graphics_shape_component_t *shape
+)
+{
+    enum {
+        ECSVM_CIRCLE_SEGMENTS = 24
+    };
+    SDL_Vertex vertices[ECSVM_CIRCLE_SEGMENTS + 2];
+    int indices[ECSVM_CIRCLE_SEGMENTS * 3];
+    const float pi = 3.14159265358979323846f;
+    const float radius_x = transform->scale.x * 0.5f;
+    const float radius_y = transform->scale.y * 0.5f;
+    int index;
+
+    vertices[0].position.x = transform->position.x;
+    vertices[0].position.y = transform->position.y;
+    vertices[0].color.r = shape->color.x;
+    vertices[0].color.g = shape->color.y;
+    vertices[0].color.b = shape->color.z;
+    vertices[0].color.a = shape->color.w;
+    vertices[0].tex_coord.x = 0.0f;
+    vertices[0].tex_coord.y = 0.0f;
+
+    for (index = 0; index <= ECSVM_CIRCLE_SEGMENTS; ++index) {
+        const float angle = ((float)index / (float)ECSVM_CIRCLE_SEGMENTS) * pi * 2.0f;
+        vertices[index + 1].position.x = transform->position.x + cosf(angle) * radius_x;
+        vertices[index + 1].position.y = transform->position.y + sinf(angle) * radius_y;
+        vertices[index + 1].color = vertices[0].color;
+        vertices[index + 1].tex_coord.x = 0.0f;
+        vertices[index + 1].tex_coord.y = 0.0f;
+    }
+
+    for (index = 0; index < ECSVM_CIRCLE_SEGMENTS; ++index) {
+        indices[index * 3] = 0;
+        indices[index * 3 + 1] = index + 1;
+        indices[index * 3 + 2] = index + 2;
+    }
+
+    return SDL_RenderGeometry(
+        renderer,
+        NULL,
+        vertices,
+        ECSVM_CIRCLE_SEGMENTS + 2,
+        indices,
+        ECSVM_CIRCLE_SEGMENTS * 3
+    );
+}
+
 static void renderer_compose_transform(
     const ecsvm_transform_component_t *parent,
     const ecsvm_transform_component_t *local,
@@ -182,10 +232,16 @@ static ecsvm_status_t ecsvm_renderer_system_tick(ecsvm_context_t *ctx)
             continue;
         }
 
-        if (shape->kind == ECSVM_SHAPE_RECTANGLE &&
-            !renderer_draw_rectangle(renderer, &transform, shape)) {
-            renderer_log_error(ctx, "SDL_RenderGeometry failed");
-            return ECSVM_ERROR_CALLBACK;
+        if (shape->kind == ECSVM_SHAPE_RECTANGLE) {
+            if (!renderer_draw_rectangle(renderer, &transform, shape)) {
+                renderer_log_error(ctx, "SDL_RenderGeometry failed");
+                return ECSVM_ERROR_CALLBACK;
+            }
+        } else if (shape->kind == ECSVM_SHAPE_CIRCLE) {
+            if (!renderer_draw_circle(renderer, &transform, shape)) {
+                renderer_log_error(ctx, "SDL_RenderGeometry failed");
+                return ECSVM_ERROR_CALLBACK;
+            }
         }
     }
 

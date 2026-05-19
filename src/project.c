@@ -419,6 +419,58 @@ static int ecsvm_project_find_semantic_function(
     return -1;
 }
 
+static int ecsvm_project_find_semantic_constant(
+    const ecsvm_semantic_constant_array_t *semantic_constants,
+    const char *qualified_name
+)
+{
+    size_t index;
+
+    for (index = 0u; index < semantic_constants->count; ++index) {
+        if (strcmp(semantic_constants->items[index].qualified_name, qualified_name) == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int ecsvm_path_parent(const char *path, char *buffer, size_t buffer_capacity)
+{
+    size_t length;
+
+    if (path == NULL || buffer == NULL || buffer_capacity == 0u) {
+        return 0;
+    }
+
+    length = strlen(path);
+    if (length + 1u > buffer_capacity) {
+        return 0;
+    }
+
+    memcpy(buffer, path, length + 1u);
+    while (length > 0u &&
+           (buffer[length - 1u] == '\\' || buffer[length - 1u] == '/')) {
+        buffer[length - 1u] = '\0';
+        length -= 1u;
+    }
+    while (length > 0u &&
+           buffer[length - 1u] != '\\' &&
+           buffer[length - 1u] != '/') {
+        length -= 1u;
+    }
+    if (length == 0u) {
+        return 0;
+    }
+
+    while (length > 0u &&
+           (buffer[length - 1u] == '\\' || buffer[length - 1u] == '/')) {
+        length -= 1u;
+    }
+    buffer[length] = '\0';
+    return length > 0u;
+}
+
 static char *ecsvm_import_attribute_data(
     const ecsvm_ecsbin_module_t *module,
     const ecsvm_ecsbin_attribute_t *attribute
@@ -539,10 +591,121 @@ static int ecsvm_import_function_attributes(
     return 1;
 }
 
+static int ecsvm_import_core_library_source_constants(
+    const char *core_library_path,
+    ecsvm_semantic_constant_array_t *semantic_constants,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    ecsvm_string_array_t source_paths;
+    ecsvm_source_file_array_t files;
+    ecsvm_semantic_struct_array_t imported_structs;
+    ecsvm_semantic_function_array_t imported_functions;
+    ecsvm_semantic_constant_array_t imported_constants;
+    char core_out_path[MAX_PATH];
+    char core_project_path[MAX_PATH];
+    char core_src_path[MAX_PATH];
+    size_t source_index;
+    int ok;
+
+    if (core_library_path == NULL || core_library_path[0] == '\0') {
+        return 1;
+    }
+
+    if (!ecsvm_path_parent(core_library_path, core_out_path, sizeof(core_out_path)) ||
+        !ecsvm_path_parent(core_out_path, core_project_path, sizeof(core_project_path)) ||
+        !ecsvm_path_join(core_project_path, "src", core_src_path, sizeof(core_src_path)) ||
+        !ecsvm_path_is_directory(core_src_path)) {
+        return 1;
+    }
+
+    memset(&source_paths, 0, sizeof(source_paths));
+    memset(&files, 0, sizeof(files));
+    memset(&imported_structs, 0, sizeof(imported_structs));
+    memset(&imported_functions, 0, sizeof(imported_functions));
+    memset(&imported_constants, 0, sizeof(imported_constants));
+    ok = 0;
+
+    if (!ecsvm_collect_ecs_files_recursive(
+            core_src_path,
+            &source_paths,
+            error_message,
+            error_message_capacity
+        )) {
+        goto cleanup;
+    }
+
+    qsort(source_paths.items, source_paths.count, sizeof(*source_paths.items), ecsvm_compare_strings);
+    for (source_index = 0u; source_index < source_paths.count; ++source_index) {
+        ecsvm_source_file_t file;
+
+        memset(&file, 0, sizeof(file));
+        file.path = source_paths.items[source_index];
+        source_paths.items[source_index] = NULL;
+        if (!ecsvm_read_text_file(file.path, &file.source, &file.length) ||
+            !ecsvm_lex_source(&file, error_message, error_message_capacity, diagnostic) ||
+            !ecsvm_parse_file(&file, error_message, error_message_capacity, diagnostic) ||
+            !ecsvm_source_file_array_push(&files, file)) {
+            ecsvm_source_file_free(&file);
+            goto cleanup;
+        }
+    }
+
+    if (!ecsvm_collect_semantics(
+            &files,
+            &imported_structs,
+            &imported_functions,
+            &imported_constants,
+            error_message,
+            error_message_capacity,
+            diagnostic
+        )) {
+        goto cleanup;
+    }
+
+    for (source_index = 0u; source_index < imported_constants.count; ++source_index) {
+        const ecsvm_semantic_constant_t *imported_constant;
+        ecsvm_semantic_constant_t copy;
+
+        imported_constant = &imported_constants.items[source_index];
+        if (ecsvm_project_find_semantic_constant(semantic_constants, imported_constant->qualified_name) >= 0) {
+            continue;
+        }
+
+        memset(&copy, 0, sizeof(copy));
+        copy.namespace_name = ecsvm_copy_string(imported_constant->namespace_name);
+        copy.name = ecsvm_copy_string(imported_constant->name);
+        copy.qualified_name = ecsvm_copy_string(imported_constant->qualified_name);
+        copy.value_text = ecsvm_copy_string(imported_constant->value_text);
+        if (copy.namespace_name == NULL ||
+            copy.name == NULL ||
+            copy.qualified_name == NULL ||
+            copy.value_text == NULL ||
+            !ecsvm_semantic_constant_array_push(semantic_constants, copy)) {
+            ecsvm_semantic_constant_free(&copy);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while importing core library constants");
+            goto cleanup;
+        }
+    }
+
+    ok = 1;
+
+cleanup:
+    ecsvm_string_array_free(&source_paths);
+    ecsvm_source_file_array_free(&files);
+    ecsvm_semantic_struct_array_free(&imported_structs);
+    ecsvm_semantic_function_array_free(&imported_functions);
+    ecsvm_semantic_constant_array_free(&imported_constants);
+    return ok;
+}
+
 static int ecsvm_import_core_library(
     const char *core_library_path,
     ecsvm_semantic_struct_array_t *semantic_structs,
     ecsvm_semantic_function_array_t *semantic_functions,
+    ecsvm_semantic_constant_array_t *semantic_constants,
     char *error_message,
     size_t error_message_capacity,
     ecsvm_diagnostic_t *diagnostic
@@ -554,6 +717,16 @@ static int ecsvm_import_core_library(
 
     if (core_library_path == NULL || core_library_path[0] == '\0') {
         return 1;
+    }
+
+    if (!ecsvm_import_core_library_source_constants(
+            core_library_path,
+            semantic_constants,
+            error_message,
+            error_message_capacity,
+            diagnostic
+        )) {
+        return 0;
     }
 
     memset(&module, 0, sizeof(module));
@@ -770,6 +943,7 @@ static ecsvm_status_t ecsvm_project_build_internal(
     ecsvm_source_file_array_t files;
     ecsvm_semantic_struct_array_t semantic_structs;
     ecsvm_semantic_function_array_t semantic_functions;
+    ecsvm_semantic_constant_array_t semantic_constants;
     ecsvm_blob_array_t blobs;
     ecsvm_type_ref_builder_array_t type_refs;
     ecsvm_field_ref_builder_array_t field_refs;
@@ -792,6 +966,7 @@ static ecsvm_status_t ecsvm_project_build_internal(
     memset(&files, 0, sizeof(files));
     memset(&semantic_structs, 0, sizeof(semantic_structs));
     memset(&semantic_functions, 0, sizeof(semantic_functions));
+    memset(&semantic_constants, 0, sizeof(semantic_constants));
     memset(&blobs, 0, sizeof(blobs));
     memset(&type_refs, 0, sizeof(type_refs));
     memset(&field_refs, 0, sizeof(field_refs));
@@ -865,11 +1040,12 @@ static ecsvm_status_t ecsvm_project_build_internal(
     }
     ecsvm_string_array_free(&source_paths);
 
-    if (!ecsvm_collect_semantics(&files, &semantic_structs, &semantic_functions, error_message, error_message_capacity, diagnostic) ||
+    if (!ecsvm_collect_semantics(&files, &semantic_structs, &semantic_functions, &semantic_constants, error_message, error_message_capacity, diagnostic) ||
         !ecsvm_import_core_library(
             core_library_path,
             &semantic_structs,
             &semantic_functions,
+            &semantic_constants,
             error_message,
             error_message_capacity,
             diagnostic
@@ -898,6 +1074,7 @@ static ecsvm_status_t ecsvm_project_build_internal(
     if (!ecsvm_build_ecsbin_tables(
             &semantic_structs,
             &semantic_functions,
+            &semantic_constants,
             &blobs,
             &type_refs,
             &field_refs,
@@ -936,6 +1113,7 @@ cleanup:
     ecsvm_source_file_array_free(&files);
     ecsvm_semantic_struct_array_free(&semantic_structs);
     ecsvm_semantic_function_array_free(&semantic_functions);
+    ecsvm_semantic_constant_array_free(&semantic_constants);
     ecsvm_blob_array_free(&blobs);
     ecsvm_type_ref_builder_array_free(&type_refs);
     ecsvm_field_ref_builder_array_free(&field_refs);

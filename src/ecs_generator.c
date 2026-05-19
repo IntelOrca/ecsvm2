@@ -475,6 +475,53 @@ static int ecsvm_find_semantic_function_by_suffix(
     return match_index;
 }
 
+static int ecsvm_find_semantic_constant(
+    const ecsvm_semantic_constant_array_t *semantic_constants,
+    const char *qualified_name
+)
+{
+    size_t index;
+
+    for (index = 0u; index < semantic_constants->count; ++index) {
+        if (strcmp(semantic_constants->items[index].qualified_name, qualified_name) == 0) {
+            return (int)index;
+        }
+    }
+
+    return -1;
+}
+
+static int ecsvm_find_semantic_constant_by_suffix(
+    const ecsvm_semantic_constant_array_t *semantic_constants,
+    const char *name
+)
+{
+    size_t index;
+    size_t name_length;
+    int match_index;
+
+    name_length = strlen(name);
+    match_index = -1;
+    for (index = 0u; index < semantic_constants->count; ++index) {
+        const char *qualified_name;
+        size_t qualified_length;
+
+        qualified_name = semantic_constants->items[index].qualified_name;
+        qualified_length = strlen(qualified_name);
+        if (strcmp(qualified_name, name) == 0 ||
+            (qualified_length > name_length &&
+             strcmp(qualified_name + qualified_length - name_length, name) == 0 &&
+             qualified_name[qualified_length - name_length - 1u] == '.')) {
+            if (match_index >= 0) {
+                return -1;
+            }
+            match_index = (int)index;
+        }
+    }
+
+    return match_index;
+}
+
 static char *ecsvm_resolve_function_name(
     const ecsvm_semantic_function_array_t *semantic_functions,
     const char *current_namespace,
@@ -596,6 +643,45 @@ static char *ecsvm_try_resolve_function_name(
         : NULL;
 }
 
+static char *ecsvm_try_resolve_constant_value(
+    const ecsvm_semantic_constant_array_t *semantic_constants,
+    const char *current_namespace,
+    const char *name
+)
+{
+    char *qualified_name;
+    int index;
+
+    index = ecsvm_find_semantic_constant(semantic_constants, name);
+    if (index >= 0) {
+        return ecsvm_copy_string(semantic_constants->items[index].value_text);
+    }
+
+    if (strchr(name, '.') != NULL) {
+        index = ecsvm_find_semantic_constant_by_suffix(semantic_constants, name);
+        return index >= 0
+            ? ecsvm_copy_string(semantic_constants->items[index].value_text)
+            : NULL;
+    }
+
+    qualified_name = ecsvm_join_qualified_name(current_namespace, name);
+    if (qualified_name == NULL) {
+        return NULL;
+    }
+
+    index = ecsvm_find_semantic_constant(semantic_constants, qualified_name);
+    if (index >= 0) {
+        free(qualified_name);
+        return ecsvm_copy_string(semantic_constants->items[index].value_text);
+    }
+
+    free(qualified_name);
+    index = ecsvm_find_semantic_constant_by_suffix(semantic_constants, name);
+    return index >= 0
+        ? ecsvm_copy_string(semantic_constants->items[index].value_text)
+        : NULL;
+}
+
 static int ecsvm_attribute_uses_type_payload(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const char *attribute_name
@@ -643,6 +729,7 @@ static int ecsvm_collect_semantic_from_node(
     const char *namespace_name,
     ecsvm_semantic_struct_array_t *semantic_structs,
     ecsvm_semantic_function_array_t *semantic_functions,
+    ecsvm_semantic_constant_array_t *semantic_constants,
     char *error_message,
     size_t error_message_capacity
 )
@@ -673,6 +760,7 @@ static int ecsvm_collect_semantic_from_node(
                     child_namespace,
                     semantic_structs,
                     semantic_functions,
+                    semantic_constants,
                     error_message,
                     error_message_capacity
                 )) {
@@ -682,6 +770,42 @@ static int ecsvm_collect_semantic_from_node(
         }
 
         free(child_namespace);
+        return 1;
+    }
+
+    if (node->kind == ECSVM_SYNTAX_DECLARATION) {
+        ecsvm_semantic_constant_t semantic_constant;
+
+        memset(&semantic_constant, 0, sizeof(semantic_constant));
+        semantic_constant.namespace_name = ecsvm_copy_string(namespace_name != NULL ? namespace_name : "");
+        semantic_constant.name = ecsvm_tokens_to_name(file, node->name_start, node->name_end);
+        semantic_constant.qualified_name = ecsvm_join_qualified_name(
+            semantic_constant.namespace_name,
+            semantic_constant.name
+        );
+        semantic_constant.value_text = (node->value_start != 0u || node->value_end != 0u)
+            ? ecsvm_tokens_to_source(file, node->value_start, node->value_end)
+            : ecsvm_copy_string("");
+        if (semantic_constant.namespace_name == NULL ||
+            semantic_constant.name == NULL ||
+            semantic_constant.qualified_name == NULL ||
+            semantic_constant.value_text == NULL) {
+            ecsvm_semantic_constant_free(&semantic_constant);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting constant declarations");
+            return 0;
+        }
+
+        if (ecsvm_find_semantic_constant(semantic_constants, semantic_constant.qualified_name) >= 0) {
+            ecsvm_semantic_constant_free(&semantic_constant);
+            ecsvm_set_error(error_message, error_message_capacity, "duplicate constant definition");
+            return 0;
+        }
+
+        if (!ecsvm_semantic_constant_array_push(semantic_constants, semantic_constant)) {
+            ecsvm_semantic_constant_free(&semantic_constant);
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while collecting constants");
+            return 0;
+        }
         return 1;
     }
 
@@ -902,6 +1026,7 @@ int ecsvm_collect_semantics(
     const ecsvm_source_file_array_t *files,
     ecsvm_semantic_struct_array_t *semantic_structs,
     ecsvm_semantic_function_array_t *semantic_functions,
+    ecsvm_semantic_constant_array_t *semantic_constants,
     char *error_message,
     size_t error_message_capacity,
     ecsvm_diagnostic_t *diagnostic
@@ -926,6 +1051,7 @@ int ecsvm_collect_semantics(
                     "",
                     semantic_structs,
                     semantic_functions,
+                    semantic_constants,
                     error_message,
                     error_message_capacity
                 )) {
@@ -1517,6 +1643,27 @@ static int ecsvm_serialize_ast_blob_text(
     return 1;
 }
 
+static int ecsvm_serialize_literal_blob_value(
+    const char *text,
+    ecsvm_blob_array_t *blobs,
+    ecsvm_ast_node_t *serialized_node,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    serialized_node->kind = ECSVM_AST_NODE_LITERAL_EXPRESSION;
+    serialized_node->first_child = 0u;
+    serialized_node->last_child = 0u;
+    serialized_node->value_kind = ECSVM_AST_VALUE_BLOB_ID;
+    serialized_node->value = ecsvm_ensure_blob(blobs, text, strlen(text));
+    if (serialized_node->value == 0u) {
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while serializing function ast");
+        return 0;
+    }
+
+    return 1;
+}
+
 static int ecsvm_serialize_operator_blob(
     const ecsvm_source_file_t *file,
     const ecsvm_ast_node_t *source_node,
@@ -1717,6 +1864,7 @@ static int ecsvm_serialize_call_target_function(
 static int ecsvm_serialize_function_ast_node(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const ecsvm_semantic_function_array_t *semantic_functions,
+    const ecsvm_semantic_constant_array_t *semantic_constants,
     const ecsvm_semantic_function_t *semantic_function,
     const ecsvm_function_ref_builder_t *function_ref,
     ecsvm_blob_array_t *blobs,
@@ -1748,10 +1896,57 @@ static int ecsvm_serialize_function_ast_node(
         ? &semantic_function->body_nodes.items[first_child->next_sibling]
         : NULL;
 
-    if (source_node->kind == ECSVM_AST_NODE_IDENTIFIER) {
+    if (source_node->kind == ECSVM_AST_NODE_MEMBER_EXPRESSION) {
+        char *constant_value;
+        char *qualified_name;
+
+        constant_value = NULL;
+        qualified_name = NULL;
+        if (!ecsvm_ast_callee_name(
+                semantic_function->body_source_file,
+                &semantic_function->body_nodes,
+                node_index,
+                &qualified_name,
+                error_message,
+                error_message_capacity
+            )) {
+            return 0;
+        }
+        if (qualified_name != NULL) {
+            constant_value = ecsvm_try_resolve_constant_value(
+                semantic_constants,
+                semantic_function->namespace_name,
+                qualified_name
+            );
+            if (constant_value == NULL &&
+                ecsvm_find_semantic_constant_by_suffix(semantic_constants, qualified_name) >= 0) {
+                ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving constant references");
+                free(qualified_name);
+                return 0;
+            }
+        }
+        free(qualified_name);
+        if (constant_value != NULL) {
+            int ok;
+
+            ok = ecsvm_serialize_literal_blob_value(
+                constant_value,
+                blobs,
+                &serialized_nodes[node_index],
+                error_message,
+                error_message_capacity
+            );
+            free(constant_value);
+            if (!ok) {
+                return 0;
+            }
+        }
+    } else if (source_node->kind == ECSVM_AST_NODE_IDENTIFIER) {
         const char *text;
         size_t length;
         uint32_t resolved_id;
+        char *constant_value;
+        char *identifier_name;
 
         if (!ecsvm_ast_source_text(
                 semantic_function->body_source_file,
@@ -1776,11 +1971,35 @@ static int ecsvm_serialize_function_ast_node(
                 )) {
                 return 0;
             }
+        } else if ((identifier_name = ecsvm_copy_string_range(text, length)) == NULL) {
+            ecsvm_set_error(error_message, error_message_capacity, "out of memory while resolving constant references");
+            return 0;
+        } else if ((constant_value = ecsvm_try_resolve_constant_value(
+                        semantic_constants,
+                        semantic_function->namespace_name,
+                        identifier_name
+                    )) != NULL) {
+            int ok;
+
+            free(identifier_name);
+            ok = ecsvm_serialize_literal_blob_value(
+                constant_value,
+                blobs,
+                &serialized_nodes[node_index],
+                error_message,
+                error_message_capacity
+            );
+            free(constant_value);
+            if (!ok) {
+                return 0;
+            }
         } else if ((resolved_id = ecsvm_resolve_parameter_id(semantic_function, function_ref, text, length)) != 0u) {
+            free(identifier_name);
             serialized_nodes[node_index].value_kind = ECSVM_AST_VALUE_PARAMETER_ID;
             serialized_nodes[node_index].value = resolved_id;
         } else if (parent_kind == ECSVM_AST_NODE_CALL_EXPRESSION &&
                    previous_index == 0u) {
+            free(identifier_name);
             if (!ecsvm_resolve_function_id(
                     semantic_functions,
                     semantic_function->namespace_name,
@@ -1805,14 +2024,17 @@ static int ecsvm_serialize_function_ast_node(
                 return 0;
             }
         } else if (!ecsvm_serialize_ast_blob_text(
-                       semantic_function->body_source_file,
-                       source_node,
-                       blobs,
-                       &serialized_nodes[node_index],
-                       error_message,
-                       error_message_capacity
-                   )) {
+                        semantic_function->body_source_file,
+                        source_node,
+                        blobs,
+                        &serialized_nodes[node_index],
+                        error_message,
+                        error_message_capacity
+                    )) {
+            free(identifier_name);
             return 0;
+        } else {
+            free(identifier_name);
         }
     } else if (source_node->kind == ECSVM_AST_NODE_TYPE_EXPRESSION) {
         const char *text;
@@ -1932,6 +2154,7 @@ static int ecsvm_serialize_function_ast_node(
             if (!ecsvm_serialize_function_ast_node(
                     semantic_structs,
                     semantic_functions,
+                    semantic_constants,
                     semantic_function,
                     function_ref,
                     blobs,
@@ -1957,6 +2180,7 @@ static int ecsvm_serialize_function_ast_node(
 static int ecsvm_serialize_function_ast_blob(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const ecsvm_semantic_function_array_t *semantic_functions,
+    const ecsvm_semantic_constant_array_t *semantic_constants,
     const ecsvm_semantic_function_t *semantic_function,
     const ecsvm_function_ref_builder_t *function_ref,
     ecsvm_blob_array_t *blobs,
@@ -1986,6 +2210,7 @@ static int ecsvm_serialize_function_ast_blob(
     if (!ecsvm_serialize_function_ast_node(
             semantic_structs,
             semantic_functions,
+            semantic_constants,
             semantic_function,
             function_ref,
             blobs,
@@ -2050,6 +2275,7 @@ static const char *ecsvm_c_type_name(const char *qualified_name);
 int ecsvm_build_ecsbin_tables(
     const ecsvm_semantic_struct_array_t *semantic_structs,
     const ecsvm_semantic_function_array_t *semantic_functions,
+    const ecsvm_semantic_constant_array_t *semantic_constants,
     ecsvm_blob_array_t *blobs,
     ecsvm_type_ref_builder_array_t *type_refs,
     ecsvm_field_ref_builder_array_t *field_refs,
@@ -2282,6 +2508,7 @@ int ecsvm_build_ecsbin_tables(
             if (!ecsvm_serialize_function_ast_blob(
                     semantic_structs,
                     semantic_functions,
+                    semantic_constants,
                     semantic_function,
                     &function_refs->items[struct_index],
                     blobs,

@@ -80,7 +80,7 @@ The current native runtime also defines:
 
 The first native built-in systems are SDL3-backed and implemented one system per source file:
 
-1. `core.window` - creates the SDL window/renderer pair, pumps events, tracks close state, and publishes frame delta time.
+1. `core.window` - creates the SDL window/renderer pair, pumps events, updates the managed `core.ui.Window` and `core.input.InputMonitor` components, and performs the `closing` handshake.
 2. `core.renderer` - renders `core.graphics.shape` entities using `core.transform`.
 
-The pong demo uses these systems directly from C without going through managed `.ecs` execution.
+The pong example uses these systems from managed `.ecs` execution.

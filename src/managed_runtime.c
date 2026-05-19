@@ -1452,6 +1452,29 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
         return 1;
     }
 
+#if ECSVM_ENABLE_SDL3
+    if (ecsvm_module_references_system_dependency(module, "core.Window") ||
+        ecsvm_module_references_system_dependency(module, "core.Renderer")) {
+        ecsvm_window_config_t window_config;
+
+        memset(&window_config, 0, sizeof(window_config));
+        window_config.title = "ecsvm";
+        window_config.width = 960;
+        window_config.height = 540;
+        window_system = ecsvm_window_system_create(&window_config);
+        if (window_system == NULL) {
+            fprintf(stderr, "failed to create SDL window system\n");
+            goto cleanup;
+        }
+
+        status = ecsvm_window_system_register(engine, window_system);
+        if (status != ECSVM_OK) {
+            fprintf(stderr, "failed to register SDL window system: %s\n", ecsvm_status_string(status));
+            goto cleanup;
+        }
+    }
+#endif
+
     {
         ecsvm_component_id_t time_component;
 
@@ -1538,26 +1561,6 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     }
 
 #if ECSVM_ENABLE_SDL3
-    if (ecsvm_module_references_system_dependency(module, "core.Window") ||
-        ecsvm_module_references_system_dependency(module, "core.Renderer")) {
-        ecsvm_window_config_t window_config;
-
-        memset(&window_config, 0, sizeof(window_config));
-        window_config.title = "ecsvm";
-        window_config.width = 960;
-        window_config.height = 540;
-        window_system = ecsvm_window_system_create(&window_config);
-        if (window_system == NULL) {
-            fprintf(stderr, "failed to create SDL window system\n");
-            goto cleanup;
-        }
-
-        status = ecsvm_window_system_register(engine, window_system);
-        if (status != ECSVM_OK) {
-            fprintf(stderr, "failed to register SDL window system: %s\n", ecsvm_status_string(status));
-            goto cleanup;
-        }
-    }
 
     if (ecsvm_module_references_system_dependency(module, "core.Renderer")) {
         ecsvm_renderer_config_t renderer_config;

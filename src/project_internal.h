@@ -200,6 +200,13 @@ typedef struct ecsvm_semantic_parameter {
     char *default_value;
 } ecsvm_semantic_parameter_t;
 
+typedef struct ecsvm_semantic_constant {
+    char *namespace_name;
+    char *name;
+    char *qualified_name;
+    char *value_text;
+} ecsvm_semantic_constant_t;
+
 typedef enum ecsvm_ast_node_kind {
     ECSVM_AST_NODE_ROOT = 1,
     ECSVM_AST_NODE_BLOCK,
@@ -281,6 +288,12 @@ typedef struct ecsvm_semantic_function_array {
     size_t count;
     size_t capacity;
 } ecsvm_semantic_function_array_t;
+
+typedef struct ecsvm_semantic_constant_array {
+    ecsvm_semantic_constant_t *items;
+    size_t count;
+    size_t capacity;
+} ecsvm_semantic_constant_array_t;
 
 typedef struct ecsvm_blob_entry {
     unsigned char *data;
@@ -493,6 +506,9 @@ int ecsvm_semantic_function_array_push(ecsvm_semantic_function_array_t *array, e
 void ecsvm_semantic_parameter_free(ecsvm_semantic_parameter_t *parameter);
 void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function);
 void ecsvm_semantic_function_array_free(ecsvm_semantic_function_array_t *array);
+int ecsvm_semantic_constant_array_push(ecsvm_semantic_constant_array_t *array, ecsvm_semantic_constant_t constant);
+void ecsvm_semantic_constant_free(ecsvm_semantic_constant_t *constant);
+void ecsvm_semantic_constant_array_free(ecsvm_semantic_constant_array_t *array);
 int ecsvm_blob_array_push(ecsvm_blob_array_t *array, ecsvm_blob_entry_t entry);
 void ecsvm_blob_array_free(ecsvm_blob_array_t *array);
 int ecsvm_type_ref_builder_array_push(ecsvm_type_ref_builder_array_t *array, ecsvm_type_ref_builder_t type_ref);
@@ -515,10 +531,10 @@ void ecsvm_ast_node_add_child(ecsvm_ast_node_array_t *array, size_t parent_index
 int ecsvm_lex_source(ecsvm_source_file_t *file, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
 int ecsvm_parser_find_matching_token(const ecsvm_parser_t *parser, size_t start_index, ecsvm_token_kind_t open_kind, ecsvm_token_kind_t close_kind, size_t *out_end_index);
 int ecsvm_parse_file(ecsvm_source_file_t *file, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
-int ecsvm_collect_semantics(const ecsvm_source_file_array_t *files, ecsvm_semantic_struct_array_t *semantic_structs, ecsvm_semantic_function_array_t *semantic_functions, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
+int ecsvm_collect_semantics(const ecsvm_source_file_array_t *files, ecsvm_semantic_struct_array_t *semantic_structs, ecsvm_semantic_function_array_t *semantic_functions, ecsvm_semantic_constant_array_t *semantic_constants, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
 int ecsvm_resolve_semantic_types(ecsvm_semantic_struct_array_t *semantic_structs, ecsvm_semantic_function_array_t *semantic_functions, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
 int ecsvm_compute_layouts(ecsvm_semantic_struct_array_t *semantic_structs, char *error_message, size_t error_message_capacity, ecsvm_diagnostic_t *diagnostic);
-int ecsvm_build_ecsbin_tables(const ecsvm_semantic_struct_array_t *semantic_structs, const ecsvm_semantic_function_array_t *semantic_functions, ecsvm_blob_array_t *blobs, ecsvm_type_ref_builder_array_t *type_refs, ecsvm_field_ref_builder_array_t *field_refs, ecsvm_field_def_builder_array_t *field_defs, ecsvm_function_ref_builder_array_t *function_refs, ecsvm_parameter_builder_array_t *parameters, ecsvm_attribute_builder_array_t *attributes, ecsvm_struct_def_builder_array_t *struct_defs);
+int ecsvm_build_ecsbin_tables(const ecsvm_semantic_struct_array_t *semantic_structs, const ecsvm_semantic_function_array_t *semantic_functions, const ecsvm_semantic_constant_array_t *semantic_constants, ecsvm_blob_array_t *blobs, ecsvm_type_ref_builder_array_t *type_refs, ecsvm_field_ref_builder_array_t *field_refs, ecsvm_field_def_builder_array_t *field_defs, ecsvm_function_ref_builder_array_t *function_refs, ecsvm_parameter_builder_array_t *parameters, ecsvm_attribute_builder_array_t *attributes, ecsvm_struct_def_builder_array_t *struct_defs);
 int ecsvm_write_ecsbin_file(const char *path, const ecsvm_blob_array_t *blobs, const ecsvm_type_ref_builder_array_t *type_refs, const ecsvm_field_ref_builder_array_t *field_refs, const ecsvm_field_def_builder_array_t *field_defs, const ecsvm_function_ref_builder_array_t *function_refs, const ecsvm_parameter_builder_array_t *parameters, const ecsvm_attribute_builder_array_t *attributes, const ecsvm_struct_def_builder_array_t *struct_defs);
 int ecsvm_write_types_header(const char *path, const ecsvm_manifest_t *manifest, ecsvm_semantic_struct_array_t *semantic_structs);
 

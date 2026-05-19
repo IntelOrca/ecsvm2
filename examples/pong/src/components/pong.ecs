@@ -3,20 +3,40 @@ namespace pong {
         value: core.vec2;
     }
 
+    component Paddle {
+        speed: f32;
+    }
+
+    component Bot {
+        speed: f32;
+        aim_offset: f32;
+    }
+
+    component Collision {
+        size: core.vec2;
+    }
+
+    component RigidBody {
+        restitution: f32;
+        immovable: bool;
+    }
+
+    component Goal {
+        scorer: i32;
+    }
+
     component GameState {
         left_paddle: entity;
         right_paddle: entity;
         ball: entity;
+        right_up_monitor: entity;
+        right_down_monitor: entity;
+        right_mouse_y_monitor: entity;
+        serve_click_monitor: entity;
         left_score: i32;
         right_score: i32;
-        serve_direction: f32;
-    }
-
-    component TickState {
-        should_update: bool;
-        accumulator_ns: u64;
-        total_elapsed_ns: u64;
-        update_count: u64;
-        delta_seconds: f32;
+        pending_goal_side: i32;
+        round_live: bool;
+        previous_serve_click: bool;
     }
 }

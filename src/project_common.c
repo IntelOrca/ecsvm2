@@ -440,6 +440,45 @@ void ecsvm_semantic_function_array_free(ecsvm_semantic_function_array_t *array)
     memset(array, 0, sizeof(*array));
 }
 
+int ecsvm_semantic_constant_array_push(
+    ecsvm_semantic_constant_array_t *array,
+    ecsvm_semantic_constant_t constant
+)
+{
+    if (!ecsvm_reserve_bytes(
+            (void **)&array->items,
+            sizeof(*array->items),
+            &array->capacity,
+            array->count + 1u
+        )) {
+        return 0;
+    }
+
+    array->items[array->count] = constant;
+    array->count += 1u;
+    return 1;
+}
+
+void ecsvm_semantic_constant_free(ecsvm_semantic_constant_t *constant)
+{
+    free(constant->namespace_name);
+    free(constant->name);
+    free(constant->qualified_name);
+    free(constant->value_text);
+    memset(constant, 0, sizeof(*constant));
+}
+
+void ecsvm_semantic_constant_array_free(ecsvm_semantic_constant_array_t *array)
+{
+    size_t index;
+
+    for (index = 0u; index < array->count; ++index) {
+        ecsvm_semantic_constant_free(&array->items[index]);
+    }
+    free(array->items);
+    memset(array, 0, sizeof(*array));
+}
+
 int ecsvm_blob_array_push(ecsvm_blob_array_t *array, ecsvm_blob_entry_t entry)
 {
     if (!ecsvm_reserve_bytes(

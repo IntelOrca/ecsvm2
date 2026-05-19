@@ -1,7 +1,9 @@
 #include "ecsvm_internal.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct ecsvm_native_binding {
     const char *qualified_name;
@@ -228,6 +230,54 @@ static ecsvm_status_t ecsvm_core_math_clamp(
     return ECSVM_OK;
 }
 
+static ecsvm_status_t ecsvm_core_math_random_int(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    const ecsvm_ecsbin_function_ref_t *function_ref,
+    uint32_t type_argument_id,
+    const ecsvm_managed_value_t *arguments,
+    size_t argument_count,
+    ecsvm_managed_value_t *out_value
+)
+{
+    double minimum_value;
+    double maximum_value;
+    int minimum;
+    int maximum;
+    unsigned int span;
+    static int seeded;
+
+    (void)engine;
+    (void)module;
+    (void)function_ref;
+    (void)type_argument_id;
+
+    if (out_value == NULL ||
+        argument_count != 2u ||
+        !ecsvm_managed_number_argument(arguments, argument_count, 0u, &minimum_value) ||
+        !ecsvm_managed_number_argument(arguments, argument_count, 1u, &maximum_value)) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    minimum = (int)minimum_value;
+    maximum = (int)maximum_value;
+    if ((double)minimum != minimum_value ||
+        (double)maximum != maximum_value ||
+        maximum < minimum) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    if (!seeded) {
+        srand((unsigned int)time(NULL));
+        seeded = 1;
+    }
+
+    span = (unsigned int)(maximum - minimum) + 1u;
+    out_value->kind = ECSVM_MANAGED_VALUE_NUMBER;
+    out_value->number_value = (double)(minimum + (int)(rand() % span));
+    return ECSVM_OK;
+}
+
 static ecsvm_status_t ecsvm_core_spawn(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
@@ -320,7 +370,8 @@ ecsvm_native_function_fn ecsvm_core_find_native_function(const char *qualified_n
         { "core.getFirstEntity", ecsvm_core_get_first_entity },
         { "core.math.min", ecsvm_core_math_min },
         { "core.math.max", ecsvm_core_math_max },
-        { "core.math.clamp", ecsvm_core_math_clamp }
+        { "core.math.clamp", ecsvm_core_math_clamp },
+        { "core.math.randomInt", ecsvm_core_math_random_int }
     };
     size_t index;
 

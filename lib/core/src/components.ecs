@@ -34,6 +34,9 @@ namespace core {
     }
 
     namespace graphics {
+        const SHAPE_RECTANGLE: i32 = 1;
+        const SHAPE_CIRCLE: i32 = 2;
+
         /**
          * Renders a geometric shape for an entity.
          */
@@ -44,6 +47,14 @@ namespace core {
     }
 
     namespace input {
+        const MONITOR_BUTTON: i32 = 1;
+        const MONITOR_AXIS: i32 = 2;
+        const DEVICE_KEYBOARD: i32 = 1;
+        const DEVICE_MOUSE: i32 = 2;
+        const MOUSE_AXIS_X: i32 = 0;
+        const MOUSE_AXIS_Y: i32 = 1;
+        const MOUSE_BUTTON_LEFT: i32 = 1;
+
         component InputMonitor {
             kind: i32;
             device: i32;
@@ -57,7 +68,7 @@ namespace core {
             width: i32;
             height: i32;
             delta_seconds: f32;
-            should_close: bool;
+            closing: bool;
         }
     }
 }

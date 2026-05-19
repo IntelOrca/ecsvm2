@@ -26,7 +26,6 @@ OBJFILES=$(OBJDIR)\component.obj \
 	$(OBJDIR)\pipeline.obj \
 	$(OBJDIR)\project.obj \
 	$(OBJDIR)\project_common.obj \
-	$(OBJDIR)\pong.obj \
 	$(OBJDIR)\stream.obj \
 	$(OBJDIR)\system_time.obj \
 	$(OBJDIR)\xml.obj
@@ -48,7 +47,6 @@ LEGACYOBJS=component.obj \
 	pipeline.obj \
 	project.obj \
 	project_common.obj \
-	pong.obj \
 	stream.obj \
 	system_time.obj \
 	xml.obj
@@ -93,7 +91,6 @@ purgelegacyobjs:
 	@if exist pipeline.obj del /Q pipeline.obj
 	@if exist project.obj del /Q project.obj
 	@if exist project_common.obj del /Q project_common.obj
-	@if exist pong.obj del /Q pong.obj
 	@if exist stream.obj del /Q stream.obj
 	@if exist system_time.obj del /Q system_time.obj
 	@if exist xml.obj del /Q xml.obj
@@ -174,10 +171,6 @@ $(OBJDIR)\project_common.obj: src\project_common.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
-$(OBJDIR)\pong.obj: src\pong.c
-	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	$(CC) $(CFLAGS) /c /Fo$@ $**
-
 $(OBJDIR)\stream.obj: src\stream.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
@@ -226,7 +219,6 @@ clean:
 	@if exist pipeline.obj del /Q pipeline.obj
 	@if exist project.obj del /Q project.obj
 	@if exist project_common.obj del /Q project_common.obj
-	@if exist pong.obj del /Q pong.obj
 	@if exist stream.obj del /Q stream.obj
 	@if exist system_time.obj del /Q system_time.obj
 	@if exist xml.obj del /Q xml.obj

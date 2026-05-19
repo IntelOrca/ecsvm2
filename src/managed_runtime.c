@@ -1053,7 +1053,7 @@ static ecsvm_status_t ecsvm_managed_execute_statement(
                 ecsvm_status_t status;
                 status = ecsvm_managed_eval_expression(
                     frame,
-                    value_node - frame->ast.nodes,
+                    (uint32_t)(value_node - frame->ast.nodes),
                     &value
                 );
                 if (status != ECSVM_OK) {

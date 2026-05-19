@@ -26,8 +26,6 @@
 
 #include "ecsvm/ecsbin.h"
 
-#define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
-
 #include "project_internal.h"
 
 static void ecsvm_manifest_free(ecsvm_manifest_t *manifest)

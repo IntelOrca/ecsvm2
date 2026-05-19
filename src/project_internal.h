@@ -10,7 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#define ECSVM_ALIGNOF(type) __alignof(type)
+#else
 #define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
+#endif
 
 typedef struct ecsvm_manifest {
     char *name;

@@ -3,25 +3,55 @@ OUTDIR=build
 OBJDIR=obj
 TARGET=$(OUTDIR)\ecsvm.exe
 !IFNDEF ECSVM_ENABLE_SDL3
-ECSVM_ENABLE_SDL3=1
+ECSVM_ENABLE_SDL3=0
 !ENDIF
 SDL3_INCDIR=dependencies\include
 SDL3_LIBDIR=dependencies\lib\x64
 SDL3_DLL=dependencies\lib\x64\SDL3.dll
 
 OBJFILES=$(OBJDIR)\component.obj \
-	$(OBJDIR)\ecsbin.obj \
+	$(OBJDIR)\bin.obj \
+	$(OBJDIR)\bin_decompile.obj \
+	$(OBJDIR)\bin_inspect.obj \
+	$(OBJDIR)\diagnostic.obj \
+	$(OBJDIR)\ecs_generator.obj \
+	$(OBJDIR)\ecs_lexer.obj \
+	$(OBJDIR)\ecs_parser.obj \
+	$(OBJDIR)\ecs_tree.obj \
 	$(OBJDIR)\ecsvm.obj \
+	$(OBJDIR)\lib_core.obj \
+	$(OBJDIR)\logger.obj \
 	$(OBJDIR)\main.obj \
+	$(OBJDIR)\managed_runtime.obj \
+	$(OBJDIR)\pipeline.obj \
 	$(OBJDIR)\project.obj \
-	$(OBJDIR)\pong.obj
+	$(OBJDIR)\project_common.obj \
+	$(OBJDIR)\pong.obj \
+	$(OBJDIR)\stream.obj \
+	$(OBJDIR)\system_time.obj \
+	$(OBJDIR)\xml.obj
 
 LEGACYOBJS=component.obj \
-	ecsbin.obj \
+	bin.obj \
+	bin_decompile.obj \
+	bin_inspect.obj \
+	diagnostic.obj \
+	ecs_generator.obj \
+	ecs_lexer.obj \
+	ecs_parser.obj \
+	ecs_tree.obj \
 	ecsvm.obj \
+	lib_core.obj \
+	logger.obj \
 	main.obj \
+	managed_runtime.obj \
+	pipeline.obj \
 	project.obj \
-	pong.obj
+	project_common.obj \
+	pong.obj \
+	stream.obj \
+	system_time.obj \
+	xml.obj
 
 !IF "$(ECSVM_ENABLE_SDL3)" == "1"
 SDL3_CFLAGS=/I$(SDL3_INCDIR)
@@ -47,11 +77,26 @@ LDFLAGS=/link /NOLOGO /OUT:$(TARGET) $(SDL3_LDFLAGS)
 
 purgelegacyobjs:
 	@if exist component.obj del /Q component.obj
-	@if exist ecsbin.obj del /Q ecsbin.obj
+	@if exist bin.obj del /Q bin.obj
+	@if exist bin_decompile.obj del /Q bin_decompile.obj
+	@if exist bin_inspect.obj del /Q bin_inspect.obj
+	@if exist diagnostic.obj del /Q diagnostic.obj
+	@if exist ecs_generator.obj del /Q ecs_generator.obj
+	@if exist ecs_lexer.obj del /Q ecs_lexer.obj
+	@if exist ecs_parser.obj del /Q ecs_parser.obj
+	@if exist ecs_tree.obj del /Q ecs_tree.obj
 	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist lib_core.obj del /Q lib_core.obj
+	@if exist logger.obj del /Q logger.obj
 	@if exist main.obj del /Q main.obj
+	@if exist managed_runtime.obj del /Q managed_runtime.obj
+	@if exist pipeline.obj del /Q pipeline.obj
 	@if exist project.obj del /Q project.obj
+	@if exist project_common.obj del /Q project_common.obj
 	@if exist pong.obj del /Q pong.obj
+	@if exist stream.obj del /Q stream.obj
+	@if exist system_time.obj del /Q system_time.obj
+	@if exist xml.obj del /Q xml.obj
 !IF "$(ECSVM_ENABLE_SDL3)" == "1"
 	@if exist system_renderer.obj del /Q system_renderer.obj
 	@if exist system_window.obj del /Q system_window.obj
@@ -65,7 +110,35 @@ $(OBJDIR)\component.obj: src\component.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
-$(OBJDIR)\ecsbin.obj: src\ecsbin.c
+$(OBJDIR)\bin.obj: src\bin.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\bin_decompile.obj: src\bin_decompile.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\bin_inspect.obj: src\bin_inspect.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\diagnostic.obj: src\diagnostic.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\ecs_generator.obj: src\ecs_generator.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\ecs_lexer.obj: src\ecs_lexer.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\ecs_parser.obj: src\ecs_parser.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\ecs_tree.obj: src\ecs_tree.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
@@ -73,7 +146,23 @@ $(OBJDIR)\ecsvm.obj: src\ecsvm.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
+$(OBJDIR)\lib_core.obj: src\lib_core.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\logger.obj: src\logger.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
 $(OBJDIR)\main.obj: src\main.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\managed_runtime.obj: src\managed_runtime.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\pipeline.obj: src\pipeline.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
@@ -81,7 +170,23 @@ $(OBJDIR)\project.obj: src\project.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
+$(OBJDIR)\project_common.obj: src\project_common.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
 $(OBJDIR)\pong.obj: src\pong.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\stream.obj: src\stream.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\system_time.obj: src\system_time.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\xml.obj: src\xml.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
@@ -105,10 +210,25 @@ clean:
 	@if exist $(OUTDIR)\SDL3.dll del /Q $(OUTDIR)\SDL3.dll
 	@if exist $(OBJDIR) rmdir /S /Q $(OBJDIR)
 	@if exist component.obj del /Q component.obj
-	@if exist ecsbin.obj del /Q ecsbin.obj
+	@if exist bin.obj del /Q bin.obj
+	@if exist bin_decompile.obj del /Q bin_decompile.obj
+	@if exist bin_inspect.obj del /Q bin_inspect.obj
+	@if exist diagnostic.obj del /Q diagnostic.obj
+	@if exist ecs_generator.obj del /Q ecs_generator.obj
+	@if exist ecs_lexer.obj del /Q ecs_lexer.obj
+	@if exist ecs_parser.obj del /Q ecs_parser.obj
+	@if exist ecs_tree.obj del /Q ecs_tree.obj
 	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist lib_core.obj del /Q lib_core.obj
+	@if exist logger.obj del /Q logger.obj
 	@if exist main.obj del /Q main.obj
+	@if exist managed_runtime.obj del /Q managed_runtime.obj
+	@if exist pipeline.obj del /Q pipeline.obj
 	@if exist project.obj del /Q project.obj
+	@if exist project_common.obj del /Q project_common.obj
 	@if exist pong.obj del /Q pong.obj
+	@if exist stream.obj del /Q stream.obj
+	@if exist system_time.obj del /Q system_time.obj
+	@if exist xml.obj del /Q xml.obj
 	@if exist system_renderer.obj del /Q system_renderer.obj
 	@if exist system_window.obj del /Q system_window.obj

@@ -146,6 +146,18 @@ static char **ecsvm_copy_string_array(
     return copies;
 }
 
+static void ecsvm_free_system_entry(ecsvm_system_entry_t *entry)
+{
+    if (entry == NULL) {
+        return;
+    }
+
+    free(entry->name);
+    ecsvm_free_string_array(entry->before, entry->before_count);
+    ecsvm_free_string_array(entry->after, entry->after_count);
+    memset(entry, 0, sizeof(*entry));
+}
+
 static ecsvm_status_t ecsvm_engine_ensure_pipeline(ecsvm_engine_t *engine)
 {
     size_t *order;
@@ -573,9 +585,7 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine)
     }
 
     for (index = 0u; index < engine->system_count; ++index) {
-        free(engine->systems[index].name);
-        ecsvm_free_string_array(engine->systems[index].before, engine->systems[index].before_count);
-        ecsvm_free_string_array(engine->systems[index].after, engine->systems[index].after_count);
+        ecsvm_free_system_entry(&engine->systems[index]);
     }
 
     for (index = 0u; index < engine->blob_count; ++index) {
@@ -831,6 +841,36 @@ ecsvm_status_t ecsvm_engine_register_system(
         *out_system_index = engine->system_count - 1u;
     }
 
+    return ECSVM_OK;
+}
+
+ecsvm_status_t ecsvm_engine_unregister_system(ecsvm_engine_t *engine, const char *name)
+{
+    ptrdiff_t index;
+    size_t remove_index;
+
+    if (engine == NULL || name == NULL || name[0] == '\0') {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    index = ecsvm_find_system_index_by_name(engine, name);
+    if (index < 0) {
+        return ECSVM_ERROR_NOT_FOUND;
+    }
+
+    remove_index = (size_t)index;
+    ecsvm_free_system_entry(&engine->systems[remove_index]);
+    if (remove_index + 1u < engine->system_count) {
+        memmove(
+            &engine->systems[remove_index],
+            &engine->systems[remove_index + 1u],
+            (engine->system_count - remove_index - 1u) * sizeof(*engine->systems)
+        );
+    }
+
+    engine->system_count -= 1u;
+    memset(&engine->systems[engine->system_count], 0, sizeof(*engine->systems));
+    engine->pipeline_dirty = 1;
     return ECSVM_OK;
 }
 

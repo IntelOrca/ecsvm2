@@ -22,6 +22,7 @@ typedef struct demo_components {
 static demo_components_t g_demo_components;
 
 int ecsvm_run_ecsbin(const char *ecsbin_path);
+int ecsvm_run_project(const char *project_path, const char *core_library_path, const char *ecsbin_path);
 
 static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
 {
@@ -502,7 +503,6 @@ int main(int argc, char **argv)
     }
 
     if ((argc - argi == 2 || argc - argi == 4) && strcmp(argv[argi], "run") == 0) {
-        const char *binary_path;
         const char *core_library_path;
         const char *run_target;
 
@@ -536,15 +536,13 @@ int main(int argc, char **argv)
                 log_failure(&logger, "build failed", status, &diagnostic, error_message);
                 return 1;
             }
-            binary_path = output_path;
+            return ecsvm_run_project(run_target, core_library_path, output_path);
         } else if (ecsvm_path_has_extension(run_target, ".ecsbin")) {
-            binary_path = run_target;
+            return ecsvm_run_ecsbin(run_target);
         } else {
             ecsvm_logger_log(&logger, ECSVM_LOG_LEVEL_ERROR, "run expects a project directory or .ecsbin file");
             return 1;
         }
-
-        return ecsvm_run_ecsbin(binary_path);
     }
 
     if (argc - argi == 2 && strcmp(argv[argi], "decompile") == 0) {

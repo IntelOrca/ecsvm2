@@ -19,6 +19,7 @@ OBJFILES=$(OBJDIR)\component.obj \
 	$(OBJDIR)\ecs_parser.obj \
 	$(OBJDIR)\ecs_tree.obj \
 	$(OBJDIR)\ecsvm.obj \
+	$(OBJDIR)\fswatch.obj \
 	$(OBJDIR)\lib_core.obj \
 	$(OBJDIR)\logger.obj \
 	$(OBJDIR)\main.obj \
@@ -27,6 +28,7 @@ OBJFILES=$(OBJDIR)\component.obj \
 	$(OBJDIR)\project.obj \
 	$(OBJDIR)\project_common.obj \
 	$(OBJDIR)\stream.obj \
+	$(OBJDIR)\system_hotreload.obj \
 	$(OBJDIR)\system_time.obj \
 	$(OBJDIR)\xml.obj
 
@@ -40,6 +42,7 @@ LEGACYOBJS=component.obj \
 	ecs_parser.obj \
 	ecs_tree.obj \
 	ecsvm.obj \
+	fswatch.obj \
 	lib_core.obj \
 	logger.obj \
 	main.obj \
@@ -48,6 +51,7 @@ LEGACYOBJS=component.obj \
 	project.obj \
 	project_common.obj \
 	stream.obj \
+	system_hotreload.obj \
 	system_time.obj \
 	xml.obj
 
@@ -84,6 +88,7 @@ purgelegacyobjs:
 	@if exist ecs_parser.obj del /Q ecs_parser.obj
 	@if exist ecs_tree.obj del /Q ecs_tree.obj
 	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist fswatch.obj del /Q fswatch.obj
 	@if exist lib_core.obj del /Q lib_core.obj
 	@if exist logger.obj del /Q logger.obj
 	@if exist main.obj del /Q main.obj
@@ -92,6 +97,7 @@ purgelegacyobjs:
 	@if exist project.obj del /Q project.obj
 	@if exist project_common.obj del /Q project_common.obj
 	@if exist stream.obj del /Q stream.obj
+	@if exist system_hotreload.obj del /Q system_hotreload.obj
 	@if exist system_time.obj del /Q system_time.obj
 	@if exist xml.obj del /Q xml.obj
 !IF "$(ECSVM_ENABLE_SDL3)" == "1"
@@ -143,6 +149,10 @@ $(OBJDIR)\ecsvm.obj: src\ecsvm.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
+$(OBJDIR)\fswatch.obj: src\fswatch.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
 $(OBJDIR)\lib_core.obj: src\lib_core.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
@@ -172,6 +182,10 @@ $(OBJDIR)\project_common.obj: src\project_common.c
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
 $(OBJDIR)\stream.obj: src\stream.c
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	$(CC) $(CFLAGS) /c /Fo$@ $**
+
+$(OBJDIR)\system_hotreload.obj: src\system_hotreload.c
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	$(CC) $(CFLAGS) /c /Fo$@ $**
 
@@ -212,6 +226,7 @@ clean:
 	@if exist ecs_parser.obj del /Q ecs_parser.obj
 	@if exist ecs_tree.obj del /Q ecs_tree.obj
 	@if exist ecsvm.obj del /Q ecsvm.obj
+	@if exist fswatch.obj del /Q fswatch.obj
 	@if exist lib_core.obj del /Q lib_core.obj
 	@if exist logger.obj del /Q logger.obj
 	@if exist main.obj del /Q main.obj
@@ -220,6 +235,7 @@ clean:
 	@if exist project.obj del /Q project.obj
 	@if exist project_common.obj del /Q project_common.obj
 	@if exist stream.obj del /Q stream.obj
+	@if exist system_hotreload.obj del /Q system_hotreload.obj
 	@if exist system_time.obj del /Q system_time.obj
 	@if exist xml.obj del /Q xml.obj
 	@if exist system_renderer.obj del /Q system_renderer.obj

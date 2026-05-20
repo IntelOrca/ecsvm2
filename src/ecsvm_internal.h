@@ -73,5 +73,6 @@ const ecsvm_function_entry_t *ecsvm_engine_function(
 );
 
 void ecsvm_engine_clear_functions(ecsvm_engine_t *engine);
+ecsvm_status_t ecsvm_engine_unregister_system(ecsvm_engine_t *engine, const char *name);
 
 #endif

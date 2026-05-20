@@ -24,6 +24,8 @@ make
 ./build/ecsvm inspect examples/pong/out/pong.ecsbin
 ```
 
+Running a **project directory** now watches its `.ecs` files and hot reloads system changes in place. Existing entities stay alive, new components can be added, and edits to existing components still require a restart. Running a `.ecsbin` file directly does not enable hot reload.
+
 Build without SDL3 by setting `ECSVM_ENABLE_SDL3=0`:
 
 ```sh

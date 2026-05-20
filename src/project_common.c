@@ -2,152 +2,85 @@
 
 #include <stdlib.h>
 
-void ecsvm_set_error(char *error_message, size_t capacity, const char *message)
-{
-    if (error_message == NULL || capacity == 0u) {
-        return;
-    }
-
-    if (message == NULL) {
-        error_message[0] = '\0';
-        return;
-    }
-
-    (void)snprintf(error_message, capacity, "%s", message);
+#define ECSVM_DEFINE_ARRAY_PUSH(function_name, owner_type, items_field, capacity_field, count_field, value_type) \
+int function_name(owner_type *owner, value_type value) \
+{ \
+    if (!ecsvm_reserve_bytes( \
+            (void **)&owner->items_field, \
+            sizeof(*owner->items_field), \
+            &owner->capacity_field, \
+            owner->count_field + 1u \
+        )) { \
+        return 0; \
+    } \
+ \
+    owner->items_field[owner->count_field] = value; \
+    owner->count_field += 1u; \
+    return 1; \
 }
 
-char *ecsvm_copy_string(const char *text)
-{
-    char *copy;
-    size_t length;
-
-    if (text == NULL) {
-        return NULL;
-    }
-
-    length = strlen(text);
-    copy = (char *)malloc(length + 1u);
-    if (copy == NULL) {
-        return NULL;
-    }
-
-    memcpy(copy, text, length + 1u);
-    return copy;
+#define ECSVM_DEFINE_ARRAY_PUSH_WITH_INDEX(function_name, owner_type, items_field, capacity_field, count_field, value_type) \
+int function_name(owner_type *owner, value_type value, size_t *out_index) \
+{ \
+    if (!ecsvm_reserve_bytes( \
+            (void **)&owner->items_field, \
+            sizeof(*owner->items_field), \
+            &owner->capacity_field, \
+            owner->count_field + 1u \
+        )) { \
+        return 0; \
+    } \
+ \
+    owner->items_field[owner->count_field] = value; \
+    if (out_index != NULL) { \
+        *out_index = owner->count_field; \
+    } \
+    owner->count_field += 1u; \
+    return 1; \
 }
 
-char *ecsvm_copy_string_range(const char *text, size_t length)
-{
-    char *copy;
-
-    copy = (char *)malloc(length + 1u);
-    if (copy == NULL) {
-        return NULL;
-    }
-
-    if (length > 0u) {
-        memcpy(copy, text, length);
-    }
-    copy[length] = '\0';
-    return copy;
+#define ECSVM_DEFINE_PLAIN_ARRAY_FREE(function_name, array_type) \
+void function_name(array_type *array) \
+{ \
+    free(array->items); \
+    memset(array, 0, sizeof(*array)); \
 }
 
-size_t ecsvm_next_capacity(size_t current, size_t minimum)
-{
-    size_t capacity;
-
-    capacity = current == 0u ? 4u : current;
-    while (capacity < minimum) {
-        capacity *= 2u;
-    }
-
-    return capacity;
+#define ECSVM_DEFINE_ARRAY_FREE(function_name, array_type, cleanup_stmt) \
+void function_name(array_type *array) \
+{ \
+    size_t index; \
+ \
+    for (index = 0u; index < array->count; ++index) { \
+        cleanup_stmt; \
+    } \
+    free(array->items); \
+    memset(array, 0, sizeof(*array)); \
 }
 
-int ecsvm_reserve_bytes(void **items, size_t item_size, size_t *capacity, size_t minimum)
-{
-    void *memory;
-    size_t new_capacity;
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_string_array_push, ecsvm_string_array_t, items, capacity, count, char *)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_token_array_push, ecsvm_token_array_t, items, capacity, count, ecsvm_token_t)
+ECSVM_DEFINE_ARRAY_PUSH_WITH_INDEX(ecsvm_syntax_node_array_push, ecsvm_syntax_node_array_t, items, capacity, count, ecsvm_syntax_node_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_source_file_array_push, ecsvm_source_file_array_t, items, capacity, count, ecsvm_source_file_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_semantic_field_array_push, ecsvm_semantic_struct_t, fields, field_capacity, field_count, ecsvm_semantic_field_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_semantic_struct_array_push, ecsvm_semantic_struct_array_t, items, capacity, count, ecsvm_semantic_struct_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_semantic_function_parameter_push, ecsvm_semantic_function_t, parameters, parameter_capacity, parameter_count, ecsvm_semantic_parameter_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_semantic_function_array_push, ecsvm_semantic_function_array_t, items, capacity, count, ecsvm_semantic_function_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_semantic_constant_array_push, ecsvm_semantic_constant_array_t, items, capacity, count, ecsvm_semantic_constant_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_blob_array_push, ecsvm_blob_array_t, items, capacity, count, ecsvm_blob_entry_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_type_ref_builder_array_push, ecsvm_type_ref_builder_array_t, items, capacity, count, ecsvm_type_ref_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_field_ref_builder_array_push, ecsvm_field_ref_builder_array_t, items, capacity, count, ecsvm_field_ref_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_field_def_builder_array_push, ecsvm_field_def_builder_array_t, items, capacity, count, ecsvm_field_def_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_function_ref_builder_array_push, ecsvm_function_ref_builder_array_t, items, capacity, count, ecsvm_function_ref_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_parameter_builder_array_push, ecsvm_parameter_builder_array_t, items, capacity, count, ecsvm_parameter_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_attribute_builder_array_push, ecsvm_attribute_builder_array_t, items, capacity, count, ecsvm_attribute_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH(ecsvm_struct_def_builder_array_push, ecsvm_struct_def_builder_array_t, items, capacity, count, ecsvm_struct_def_builder_t)
+ECSVM_DEFINE_ARRAY_PUSH_WITH_INDEX(ecsvm_ast_node_array_push, ecsvm_ast_node_array_t, items, capacity, count, ecsvm_ast_node_t)
 
-    if (minimum <= *capacity) {
-        return 1;
-    }
-
-    new_capacity = ecsvm_next_capacity(*capacity, minimum);
-    memory = realloc(*items, item_size * new_capacity);
-    if (memory == NULL) {
-        return 0;
-    }
-
-    *items = memory;
-    *capacity = new_capacity;
-    return 1;
-}
-
-int ecsvm_string_array_push(ecsvm_string_array_t *array, char *value)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_string_array_free(ecsvm_string_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index]);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_token_array_push(ecsvm_token_array_t *array, ecsvm_token_t token)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = token;
-    array->count += 1u;
-    return 1;
-}
-
-int ecsvm_syntax_node_array_push(
-    ecsvm_syntax_node_array_t *array,
-    ecsvm_syntax_node_t node,
-    size_t *out_index
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = node;
-    if (out_index != NULL) {
-        *out_index = array->count;
-    }
-    array->count += 1u;
-    return 1;
-}
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_string_array_free, ecsvm_string_array_t, free(array->items[index]))
+ECSVM_DEFINE_PLAIN_ARRAY_FREE(ecsvm_field_def_builder_array_free, ecsvm_field_def_builder_array_t)
+ECSVM_DEFINE_PLAIN_ARRAY_FREE(ecsvm_attribute_builder_array_free, ecsvm_attribute_builder_array_t)
+ECSVM_DEFINE_PLAIN_ARRAY_FREE(ecsvm_struct_def_builder_array_free, ecsvm_struct_def_builder_array_t)
 
 void ecsvm_syntax_node_add_child(
     ecsvm_syntax_node_array_t *nodes,
@@ -170,25 +103,6 @@ void ecsvm_syntax_node_add_child(
     }
 }
 
-int ecsvm_source_file_array_push(
-    ecsvm_source_file_array_t *array,
-    ecsvm_source_file_t file
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = file;
-    array->count += 1u;
-    return 1;
-}
-
 void ecsvm_source_file_free(ecsvm_source_file_t *file)
 {
     if (file == NULL) {
@@ -202,35 +116,7 @@ void ecsvm_source_file_free(ecsvm_source_file_t *file)
     memset(file, 0, sizeof(*file));
 }
 
-void ecsvm_source_file_array_free(ecsvm_source_file_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        ecsvm_source_file_free(&array->items[index]);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_semantic_field_array_push(
-    ecsvm_semantic_struct_t *semantic_struct,
-    ecsvm_semantic_field_t field
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&semantic_struct->fields,
-            sizeof(*semantic_struct->fields),
-            &semantic_struct->field_capacity,
-            semantic_struct->field_count + 1u
-        )) {
-        return 0;
-    }
-
-    semantic_struct->fields[semantic_struct->field_count] = field;
-    semantic_struct->field_count += 1u;
-    return 1;
-}
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_source_file_array_free, ecsvm_source_file_array_t, ecsvm_source_file_free(&array->items[index]))
 
 int ecsvm_semantic_attribute_push(
     ecsvm_semantic_struct_t *semantic_struct,
@@ -268,25 +154,6 @@ int ecsvm_semantic_attribute_push(
     return 1;
 }
 
-int ecsvm_semantic_struct_array_push(
-    ecsvm_semantic_struct_array_t *array,
-    ecsvm_semantic_struct_t semantic_struct
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = semantic_struct;
-    array->count += 1u;
-    return 1;
-}
-
 void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct)
 {
     size_t index;
@@ -308,35 +175,7 @@ void ecsvm_semantic_struct_free(ecsvm_semantic_struct_t *semantic_struct)
     memset(semantic_struct, 0, sizeof(*semantic_struct));
 }
 
-void ecsvm_semantic_struct_array_free(ecsvm_semantic_struct_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        ecsvm_semantic_struct_free(&array->items[index]);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_semantic_function_parameter_push(
-    ecsvm_semantic_function_t *function,
-    ecsvm_semantic_parameter_t parameter
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&function->parameters,
-            sizeof(*function->parameters),
-            &function->parameter_capacity,
-            function->parameter_count + 1u
-        )) {
-        return 0;
-    }
-
-    function->parameters[function->parameter_count] = parameter;
-    function->parameter_count += 1u;
-    return 1;
-}
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_semantic_struct_array_free, ecsvm_semantic_struct_array_t, ecsvm_semantic_struct_free(&array->items[index]))
 
 int ecsvm_semantic_function_attribute_push(
     ecsvm_semantic_function_t *function,
@@ -371,25 +210,6 @@ int ecsvm_semantic_function_attribute_push(
     function->attributes[function->attribute_count] = attribute_name;
     function->attribute_data[function->attribute_count] = attribute_data;
     function->attribute_count += 1u;
-    return 1;
-}
-
-int ecsvm_semantic_function_array_push(
-    ecsvm_semantic_function_array_t *array,
-    ecsvm_semantic_function_t function
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = function;
-    array->count += 1u;
     return 1;
 }
 
@@ -429,35 +249,7 @@ void ecsvm_semantic_function_free(ecsvm_semantic_function_t *function)
     memset(function, 0, sizeof(*function));
 }
 
-void ecsvm_semantic_function_array_free(ecsvm_semantic_function_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        ecsvm_semantic_function_free(&array->items[index]);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_semantic_constant_array_push(
-    ecsvm_semantic_constant_array_t *array,
-    ecsvm_semantic_constant_t constant
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = constant;
-    array->count += 1u;
-    return 1;
-}
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_semantic_function_array_free, ecsvm_semantic_function_array_t, ecsvm_semantic_function_free(&array->items[index]))
 
 void ecsvm_semantic_constant_free(ecsvm_semantic_constant_t *constant)
 {
@@ -468,264 +260,12 @@ void ecsvm_semantic_constant_free(ecsvm_semantic_constant_t *constant)
     memset(constant, 0, sizeof(*constant));
 }
 
-void ecsvm_semantic_constant_array_free(ecsvm_semantic_constant_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        ecsvm_semantic_constant_free(&array->items[index]);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_blob_array_push(ecsvm_blob_array_t *array, ecsvm_blob_entry_t entry)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = entry;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_blob_array_free(ecsvm_blob_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index].data);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_type_ref_builder_array_push(
-    ecsvm_type_ref_builder_array_t *array,
-    ecsvm_type_ref_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_type_ref_builder_array_free(ecsvm_type_ref_builder_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index].namespace_name);
-        free(array->items[index].name);
-        free(array->items[index].qualified_name);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_field_ref_builder_array_push(
-    ecsvm_field_ref_builder_array_t *array,
-    ecsvm_field_ref_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_field_ref_builder_array_free(ecsvm_field_ref_builder_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index].name);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_field_def_builder_array_push(
-    ecsvm_field_def_builder_array_t *array,
-    ecsvm_field_def_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_field_def_builder_array_free(ecsvm_field_def_builder_array_t *array)
-{
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_function_ref_builder_array_push(
-    ecsvm_function_ref_builder_array_t *array,
-    ecsvm_function_ref_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_function_ref_builder_array_free(ecsvm_function_ref_builder_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index].namespace_name);
-        free(array->items[index].name);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_parameter_builder_array_push(
-    ecsvm_parameter_builder_array_t *array,
-    ecsvm_parameter_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_parameter_builder_array_free(ecsvm_parameter_builder_array_t *array)
-{
-    size_t index;
-
-    for (index = 0u; index < array->count; ++index) {
-        free(array->items[index].name);
-    }
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_attribute_builder_array_push(
-    ecsvm_attribute_builder_array_t *array,
-    ecsvm_attribute_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_attribute_builder_array_free(ecsvm_attribute_builder_array_t *array)
-{
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_struct_def_builder_array_push(
-    ecsvm_struct_def_builder_array_t *array,
-    ecsvm_struct_def_builder_t value
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = value;
-    array->count += 1u;
-    return 1;
-}
-
-void ecsvm_struct_def_builder_array_free(ecsvm_struct_def_builder_array_t *array)
-{
-    free(array->items);
-    memset(array, 0, sizeof(*array));
-}
-
-int ecsvm_ast_node_array_push(
-    ecsvm_ast_node_array_t *array,
-    ecsvm_ast_node_t node,
-    size_t *out_index
-)
-{
-    if (!ecsvm_reserve_bytes(
-            (void **)&array->items,
-            sizeof(*array->items),
-            &array->capacity,
-            array->count + 1u
-        )) {
-        return 0;
-    }
-
-    array->items[array->count] = node;
-    if (out_index != NULL) {
-        *out_index = array->count;
-    }
-    array->count += 1u;
-    return 1;
-}
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_semantic_constant_array_free, ecsvm_semantic_constant_array_t, ecsvm_semantic_constant_free(&array->items[index]))
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_blob_array_free, ecsvm_blob_array_t, free(array->items[index].data))
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_type_ref_builder_array_free, ecsvm_type_ref_builder_array_t, do { free(array->items[index].namespace_name); free(array->items[index].name); free(array->items[index].qualified_name); } while (0))
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_field_ref_builder_array_free, ecsvm_field_ref_builder_array_t, free(array->items[index].name))
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_function_ref_builder_array_free, ecsvm_function_ref_builder_array_t, do { free(array->items[index].namespace_name); free(array->items[index].name); } while (0))
+ECSVM_DEFINE_ARRAY_FREE(ecsvm_parameter_builder_array_free, ecsvm_parameter_builder_array_t, free(array->items[index].name))
 
 void ecsvm_ast_node_add_child(
     ecsvm_ast_node_array_t *nodes,

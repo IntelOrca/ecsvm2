@@ -1,14 +1,11 @@
 #include "ecsvm/ecsbin.h"
 
+#include "text_buffer.h"
+#include "utility.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-typedef struct ecsvm_text_buffer {
-    char *data;
-    size_t length;
-    size_t capacity;
-} ecsvm_text_buffer_t;
 
 typedef struct ecsvm_table_column {
     const char *header;
@@ -24,86 +21,8 @@ static void ecsvm_inspect_set_error(
     const char *message
 )
 {
-    if (error_message != NULL && error_message_capacity > 0u) {
-        (void)snprintf(error_message, error_message_capacity, "%s", message != NULL ? message : "");
-    }
+    ecsvm_set_error(error_message, error_message_capacity, message != NULL ? message : "");
     ecsvm_diagnostic_set(diagnostic, NULL, 0u, 0u, code, message);
-}
-
-static int ecsvm_text_buffer_reserve(ecsvm_text_buffer_t *buffer, size_t additional)
-{
-    size_t required;
-    size_t capacity;
-    char *data;
-
-    required = buffer->length + additional + 1u;
-    if (required <= buffer->capacity) {
-        return 1;
-    }
-
-    capacity = buffer->capacity == 0u ? 256u : buffer->capacity;
-    while (capacity < required) {
-        capacity *= 2u;
-    }
-
-    data = (char *)realloc(buffer->data, capacity);
-    if (data == NULL) {
-        return 0;
-    }
-
-    buffer->data = data;
-    buffer->capacity = capacity;
-    return 1;
-}
-
-static int ecsvm_text_buffer_append_range(
-    ecsvm_text_buffer_t *buffer,
-    const char *text,
-    size_t length
-)
-{
-    if (!ecsvm_text_buffer_reserve(buffer, length)) {
-        return 0;
-    }
-
-    if (length > 0u) {
-        memcpy(buffer->data + buffer->length, text, length);
-        buffer->length += length;
-    }
-    buffer->data[buffer->length] = '\0';
-    return 1;
-}
-
-static int ecsvm_text_buffer_append(ecsvm_text_buffer_t *buffer, const char *text)
-{
-    return ecsvm_text_buffer_append_range(buffer, text, strlen(text));
-}
-
-static int ecsvm_text_buffer_append_char(ecsvm_text_buffer_t *buffer, char ch)
-{
-    if (!ecsvm_text_buffer_reserve(buffer, 1u)) {
-        return 0;
-    }
-
-    buffer->data[buffer->length++] = ch;
-    buffer->data[buffer->length] = '\0';
-    return 1;
-}
-
-static int ecsvm_text_buffer_append_repeat(
-    ecsvm_text_buffer_t *buffer,
-    char ch,
-    size_t count
-)
-{
-    size_t index;
-
-    for (index = 0u; index < count; ++index) {
-        if (!ecsvm_text_buffer_append_char(buffer, ch)) {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static int ecsvm_table_append_separator(

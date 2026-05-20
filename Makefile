@@ -18,17 +18,21 @@ COMMON_SRCS := \
 	src/ecs_lexer.c \
 	src/ecs_parser.c \
 	src/ecsvm.c \
+	src/file_util.c \
 	src/fswatch.c \
 	src/lib_core.c \
 	src/logger.c \
 	src/managed_runtime.c \
 	src/main.c \
+	src/path_util.c \
 	src/pipeline.c \
 	src/project.c \
 	src/project_common.c \
 	src/stream.c \
 	src/system_hotreload.c \
 	src/system_time.c \
+	src/text_buffer.c \
+	src/utility.c \
 	src/xml.c
 
 COMMON_OBJS := $(COMMON_SRCS:src/%.c=$(OBJ_DIR)/%.o)

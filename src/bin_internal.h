@@ -3,6 +3,7 @@
 
 #include "ecsvm/ecsbin.h"
 #include "ecsvm/diagnostic.h"
+#include "text_buffer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -218,12 +219,6 @@ typedef struct ecsvm_ecsbin_ast_blob {
     size_t node_count;
     uint32_t version;
 } ecsvm_ecsbin_ast_blob_t;
-
-typedef struct ecsvm_ecsbin_text_buffer {
-    char *data;
-    size_t length;
-    size_t capacity;
-} ecsvm_ecsbin_text_buffer_t;
 
 enum {
     ECSVM_ECSBIN_VERSION_0 = 0u,

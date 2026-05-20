@@ -1,61 +1,29 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#define ecsvm_fswatch_stricmp _stricmp
-#define ECSVM_FSWATCH_PATH_SEPARATOR '\\'
 #else
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
-#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#define ecsvm_fswatch_stricmp strcasecmp
-#define ECSVM_FSWATCH_PATH_SEPARATOR '/'
 #endif
 
 #include "fswatch.h"
+
+#include "path_util.h"
+#include "utility.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef MAX_PATH
-#define MAX_PATH 4096
+#ifdef _WIN32
+#define ecsvm_fswatch_stricmp _stricmp
+#else
+#include <strings.h>
+#define ecsvm_fswatch_stricmp strcasecmp
 #endif
-
-static void ecsvm_fswatch_set_error(char *error_message, size_t capacity, const char *message)
-{
-    if (error_message == NULL || capacity == 0u) {
-        return;
-    }
-
-    if (message == NULL) {
-        error_message[0] = '\0';
-        return;
-    }
-
-    (void)snprintf(error_message, capacity, "%s", message);
-}
-
-static char *ecsvm_fswatch_copy_string(const char *text)
-{
-    char *copy;
-    size_t length;
-
-    if (text == NULL) {
-        return NULL;
-    }
-
-    length = strlen(text);
-    copy = (char *)malloc(length + 1u);
-    if (copy == NULL) {
-        return NULL;
-    }
-
-    memcpy(copy, text, length + 1u);
-    return copy;
-}
 
 static void ecsvm_fswatch_entry_free(ecsvm_fswatch_entry_t *entry)
 {
@@ -94,10 +62,7 @@ static int ecsvm_fswatch_reserve_entries(
         return 1;
     }
 
-    new_capacity = *capacity == 0u ? 8u : *capacity;
-    while (new_capacity < minimum) {
-        new_capacity *= 2u;
-    }
+    new_capacity = ecsvm_next_capacity(*capacity == 0u ? 8u : *capacity, minimum);
 
     memory = (ecsvm_fswatch_entry_t *)realloc(*entries, new_capacity * sizeof(*memory));
     if (memory == NULL) {
@@ -123,13 +88,13 @@ static int ecsvm_fswatch_push_entry(
     char *path_copy;
 
     if (!ecsvm_fswatch_reserve_entries(entries, capacity, *count + 1u)) {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "out of memory while tracking source files");
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while tracking source files");
         return 0;
     }
 
-    path_copy = ecsvm_fswatch_copy_string(path);
+    path_copy = ecsvm_copy_string(path);
     if (path_copy == NULL) {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "out of memory while tracking source files");
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while tracking source files");
         return 0;
     }
 
@@ -141,51 +106,9 @@ static int ecsvm_fswatch_push_entry(
     return 1;
 }
 
-static int ecsvm_fswatch_path_join(
-    const char *left,
-    const char *right,
-    char *buffer,
-    size_t buffer_capacity
-)
-{
-    size_t left_length;
-    const char *right_part;
-
-    if (left == NULL || right == NULL || buffer == NULL || buffer_capacity == 0u) {
-        return 0;
-    }
-
-    left_length = strlen(left);
-    right_part = right;
-    while (*right_part == '\\' || *right_part == '/') {
-        right_part += 1;
-    }
-
-    if (left_length > 0u &&
-        (left[left_length - 1u] == '\\' || left[left_length - 1u] == '/')) {
-        return snprintf(buffer, buffer_capacity, "%s%s", left, right_part) > 0;
-    }
-
-    return snprintf(
-        buffer,
-        buffer_capacity,
-        "%s%c%s",
-        left,
-        ECSVM_FSWATCH_PATH_SEPARATOR,
-        right_part
-    ) > 0;
-}
-
 static int ecsvm_fswatch_has_ecs_extension(const char *path)
 {
-    const char *dot;
-
-    if (path == NULL) {
-        return 0;
-    }
-
-    dot = strrchr(path, '.');
-    return dot != NULL && ecsvm_fswatch_stricmp(dot, ".ecs") == 0;
+    return ecsvm_path_has_extension(path, ".ecs");
 }
 
 static int ecsvm_fswatch_compare_paths(const void *left, const void *right)
@@ -244,10 +167,10 @@ static int ecsvm_fswatch_collect_recursive(
     WIN32_FIND_DATAA find_data;
     HANDLE handle;
 
-    if (!ecsvm_fswatch_path_join(directory, "*", search_pattern, sizeof(search_pattern))) {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "source path is too long");
-        return 0;
-    }
+        if (!ecsvm_path_join(directory, "*", search_pattern, sizeof(search_pattern))) {
+            ecsvm_set_error(error_message, error_message_capacity, "source path is too long");
+            return 0;
+        }
 
     handle = FindFirstFileA(search_pattern, &find_data);
     if (handle == INVALID_HANDLE_VALUE) {
@@ -261,9 +184,9 @@ static int ecsvm_fswatch_collect_recursive(
             continue;
         }
 
-        if (!ecsvm_fswatch_path_join(directory, find_data.cFileName, path, sizeof(path))) {
+        if (!ecsvm_path_join(directory, find_data.cFileName, path, sizeof(path))) {
             FindClose(handle);
-            ecsvm_fswatch_set_error(error_message, error_message_capacity, "source path is too long");
+            ecsvm_set_error(error_message, error_message_capacity, "source path is too long");
             return 0;
         }
 
@@ -331,9 +254,9 @@ static int ecsvm_fswatch_collect_recursive(
             continue;
         }
 
-        if (!ecsvm_fswatch_path_join(directory, entry->d_name, path, sizeof(path))) {
+        if (!ecsvm_path_join(directory, entry->d_name, path, sizeof(path))) {
             closedir(dir);
-            ecsvm_fswatch_set_error(error_message, error_message_capacity, "source path is too long");
+            ecsvm_set_error(error_message, error_message_capacity, "source path is too long");
             return 0;
         }
 
@@ -394,7 +317,7 @@ static int ecsvm_fswatch_snapshot(
     capacity = 0u;
     *out_entries = NULL;
     *out_count = 0u;
-    ecsvm_fswatch_set_error(error_message, error_message_capacity, NULL);
+    ecsvm_set_error(error_message, error_message_capacity, NULL);
 
     if (!ecsvm_fswatch_collect_recursive(
             root_path,
@@ -425,14 +348,14 @@ int ecsvm_fswatch_init(
 )
 {
     if (watch == NULL || root_path == NULL || root_path[0] == '\0') {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "invalid file watcher root path");
+        ecsvm_set_error(error_message, error_message_capacity, "invalid file watcher root path");
         return 0;
     }
 
     memset(watch, 0, sizeof(*watch));
-    watch->root_path = ecsvm_fswatch_copy_string(root_path);
+    watch->root_path = ecsvm_copy_string(root_path);
     if (watch->root_path == NULL) {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "out of memory while preparing file watcher");
+        ecsvm_set_error(error_message, error_message_capacity, "out of memory while preparing file watcher");
         return 0;
     }
 
@@ -474,7 +397,7 @@ int ecsvm_fswatch_poll(
     int changed;
 
     if (watch == NULL || out_changed == NULL) {
-        ecsvm_fswatch_set_error(error_message, error_message_capacity, "invalid file watcher state");
+        ecsvm_set_error(error_message, error_message_capacity, "invalid file watcher state");
         return 0;
     }
 

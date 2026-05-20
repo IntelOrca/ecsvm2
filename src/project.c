@@ -2,20 +2,13 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <direct.h>
-#define ECSVM_PATH_SEPARATOR '\\'
-#define ecsvm_stricmp _stricmp
+#define ecsvm_project_stricmp _stricmp
 #else
-#include <dirent.h>
 #include <strings.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
-#ifndef MAX_PATH
-#define MAX_PATH 4096
-#endif
-#define ECSVM_PATH_SEPARATOR '/'
-#define ecsvm_stricmp strcasecmp
+#define ecsvm_project_stricmp strcasecmp
 #endif
 
 #include <errno.h>
@@ -26,6 +19,8 @@
 
 #include "ecsvm/ecsbin.h"
 
+#include "file_util.h"
+#include "path_util.h"
 #include "project_internal.h"
 
 static void ecsvm_manifest_free(ecsvm_manifest_t *manifest)
@@ -34,134 +29,6 @@ static void ecsvm_manifest_free(ecsvm_manifest_t *manifest)
     free(manifest->version);
     free(manifest->entry);
     memset(manifest, 0, sizeof(*manifest));
-}
-
-int ecsvm_path_is_directory(const char *path)
-{
-#ifdef _WIN32
-    DWORD attributes;
-
-    if (path == NULL || path[0] == '\0') {
-        return 0;
-    }
-
-    attributes = GetFileAttributesA(path);
-    return attributes != INVALID_FILE_ATTRIBUTES &&
-        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#else
-    struct stat status;
-
-    if (path == NULL || path[0] == '\0') {
-        return 0;
-    }
-
-    return stat(path, &status) == 0 && S_ISDIR(status.st_mode);
-#endif
-}
-
-static int ecsvm_path_exists(const char *path)
-{
-#ifdef _WIN32
-    DWORD attributes;
-
-    if (path == NULL || path[0] == '\0') {
-        return 0;
-    }
-
-    attributes = GetFileAttributesA(path);
-    return attributes != INVALID_FILE_ATTRIBUTES;
-#else
-    struct stat status;
-
-    if (path == NULL || path[0] == '\0') {
-        return 0;
-    }
-
-    return stat(path, &status) == 0;
-#endif
-}
-
-int ecsvm_path_has_extension(const char *path, const char *extension)
-{
-    const char *dot;
-
-    if (path == NULL || extension == NULL) {
-        return 0;
-    }
-
-    dot = strrchr(path, '.');
-    return dot != NULL && ecsvm_stricmp(dot, extension) == 0;
-}
-
-static int ecsvm_path_join(
-    const char *left,
-    const char *right,
-    char *buffer,
-    size_t buffer_capacity
-)
-{
-    size_t left_length;
-    const char *right_part;
-
-    if (left == NULL || right == NULL || buffer == NULL || buffer_capacity == 0u) {
-        return 0;
-    }
-
-    left_length = strlen(left);
-    right_part = right;
-    while (*right_part == '\\' || *right_part == '/') {
-        right_part += 1;
-    }
-
-    if (left_length > 0u &&
-        (left[left_length - 1u] == '\\' || left[left_length - 1u] == '/')) {
-        return snprintf(buffer, buffer_capacity, "%s%s", left, right_part) > 0;
-    }
-
-    return snprintf(buffer, buffer_capacity, "%s%c%s", left, ECSVM_PATH_SEPARATOR, right_part) > 0;
-}
-
-static int ecsvm_read_text_file(const char *path, char **out_text, size_t *out_length)
-{
-    FILE *file;
-    long length;
-    char *text;
-
-    file = fopen(path, "rb");
-    if (file == NULL) {
-        return 0;
-    }
-
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return 0;
-    }
-
-    length = ftell(file);
-    if (length < 0 || fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return 0;
-    }
-
-    text = (char *)malloc((size_t)length + 1u);
-    if (text == NULL) {
-        fclose(file);
-        return 0;
-    }
-
-    if (length > 0 && fread(text, 1u, (size_t)length, file) != (size_t)length) {
-        free(text);
-        fclose(file);
-        return 0;
-    }
-
-    fclose(file);
-    text[length] = '\0';
-    *out_text = text;
-    if (out_length != NULL) {
-        *out_length = (size_t)length;
-    }
-    return 1;
 }
 
 static int ecsvm_manifest_extract_value(
@@ -371,20 +238,7 @@ static int ecsvm_compare_strings(const void *left, const void *right)
 
     left_text = (const char *const *)left;
     right_text = (const char *const *)right;
-    return ecsvm_stricmp(*left_text, *right_text);
-}
-
-static int ecsvm_ensure_directory(const char *path)
-{
-#ifdef _WIN32
-    if (_mkdir(path) == 0 || errno == EEXIST) {
-#else
-    if (mkdir(path, 0777) == 0 || errno == EEXIST) {
-#endif
-        return 1;
-    }
-
-    return 0;
+    return ecsvm_project_stricmp(*left_text, *right_text);
 }
 
 static int ecsvm_project_find_semantic_struct(
@@ -433,42 +287,6 @@ static int ecsvm_project_find_semantic_constant(
     }
 
     return -1;
-}
-
-static int ecsvm_path_parent(const char *path, char *buffer, size_t buffer_capacity)
-{
-    size_t length;
-
-    if (path == NULL || buffer == NULL || buffer_capacity == 0u) {
-        return 0;
-    }
-
-    length = strlen(path);
-    if (length + 1u > buffer_capacity) {
-        return 0;
-    }
-
-    memcpy(buffer, path, length + 1u);
-    while (length > 0u &&
-           (buffer[length - 1u] == '\\' || buffer[length - 1u] == '/')) {
-        buffer[length - 1u] = '\0';
-        length -= 1u;
-    }
-    while (length > 0u &&
-           buffer[length - 1u] != '\\' &&
-           buffer[length - 1u] != '/') {
-        length -= 1u;
-    }
-    if (length == 0u) {
-        return 0;
-    }
-
-    while (length > 0u &&
-           (buffer[length - 1u] == '\\' || buffer[length - 1u] == '/')) {
-        length -= 1u;
-    }
-    buffer[length] = '\0';
-    return length > 0u;
 }
 
 static char *ecsvm_import_attribute_data(

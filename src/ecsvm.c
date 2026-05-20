@@ -1,4 +1,5 @@
 #include "ecsvm_internal.h"
+#include "utility.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,37 +69,6 @@ static void ecsvm_default_log(void *userdata, const char *message)
     if (message != NULL) {
         fprintf(stderr, "%s\n", message);
     }
-}
-
-static size_t ecsvm_next_capacity(size_t current, size_t minimum)
-{
-    size_t capacity;
-
-    capacity = current == 0u ? 4u : current;
-    while (capacity < minimum) {
-        capacity *= 2u;
-    }
-
-    return capacity;
-}
-
-static char *ecsvm_copy_string(const char *text)
-{
-    char *copy;
-    size_t length;
-
-    if (text == NULL) {
-        return NULL;
-    }
-
-    length = strlen(text);
-    copy = (char *)malloc(length + 1u);
-    if (copy == NULL) {
-        return NULL;
-    }
-
-    memcpy(copy, text, length + 1u);
-    return copy;
 }
 
 static void ecsvm_free_string_array(char **items, size_t count)

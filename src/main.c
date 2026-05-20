@@ -95,22 +95,11 @@ static ecsvm_status_t demo_integrate(ecsvm_context_t *ctx)
 #include "ecsvm/diagnostic.h"
 #include "ecsvm/logger.h"
 #include "ecs_tree.h"
+#include "file_util.h"
+#include "path_util.h"
 #include "project_internal.h"
 #include "stream.h"
 #include "xml.h"
-
-#ifdef _WIN32
-#include <direct.h>
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-#else
-#include <limits.h>
-#include <unistd.h>
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-#endif
 
 static void print_usage(const char *argv0)
 {
@@ -121,54 +110,6 @@ static void print_usage(const char *argv0)
     );
 }
 
-static int ecsvm_cli_path_is_absolute(const char *path)
-{
-    if (path == NULL || path[0] == '\0') {
-        return 0;
-    }
-
-#ifdef _WIN32
-    return (path[0] >= 'A' && path[0] <= 'Z' && path[1] == ':') ||
-        (path[0] >= 'a' && path[0] <= 'z' && path[1] == ':') ||
-        path[0] == '\\' ||
-        path[0] == '/';
-#else
-    return path[0] == '/';
-#endif
-}
-
-static char *ecsvm_cli_make_absolute_path(const char *path)
-{
-    char cwd[PATH_MAX];
-    size_t length;
-    char *result;
-
-    if (path == NULL) {
-        return NULL;
-    }
-
-    if (ecsvm_cli_path_is_absolute(path)) {
-        return ecsvm_copy_string(path);
-    }
-
-#ifdef _WIN32
-    if (_getcwd(cwd, (int)sizeof(cwd)) == NULL) {
-#else
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-#endif
-        return ecsvm_copy_string(path);
-    }
-
-    length = strlen(cwd) + 1u + strlen(path) + 1u;
-    result = (char *)malloc(length);
-    if (result == NULL) {
-        return NULL;
-    }
-
-    (void)snprintf(result, length, "%s/%s", cwd, path);
-    return result;
-}
-
 static int ecsvm_cli_read_source_file(
     const char *path,
     ecsvm_source_file_t *file,
@@ -177,64 +118,19 @@ static int ecsvm_cli_read_source_file(
     ecsvm_diagnostic_t *diagnostic
 )
 {
-    FILE *stream;
-    long length;
-
     memset(file, 0, sizeof(*file));
-    file->path = ecsvm_cli_make_absolute_path(path);
+    file->path = ecsvm_path_make_absolute(path);
     if (file->path == NULL) {
         ecsvm_set_error(error_message, error_message_capacity, "out of memory while preparing source path");
         ecsvm_diagnostic_set(diagnostic, path, 0u, 0u, ECSVM_DIAGNOSTIC_OUT_OF_MEMORY, error_message);
         return 0;
     }
 
-    stream = fopen(path, "rb");
-    if (stream == NULL) {
+    if (!ecsvm_read_text_file(path, &file->source, &file->length)) {
         ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
         ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
         return 0;
     }
-
-    if (fseek(stream, 0, SEEK_END) != 0) {
-        fclose(stream);
-        ecsvm_set_error(error_message, error_message_capacity, "failed to seek source file");
-        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to seek source file");
-        return 0;
-    }
-
-    length = ftell(stream);
-    if (length < 0 || fseek(stream, 0, SEEK_SET) != 0) {
-        fclose(stream);
-        ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
-        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
-        return 0;
-    }
-
-    file->source = (char *)malloc((size_t)length + 1u);
-    if (file->source == NULL) {
-        fclose(stream);
-        ecsvm_set_error(error_message, error_message_capacity, "out of memory while reading source file");
-        ecsvm_diagnostic_set(
-            diagnostic,
-            file->path,
-            0u,
-            0u,
-            ECSVM_DIAGNOSTIC_OUT_OF_MEMORY,
-            "out of memory while reading source file"
-        );
-        return 0;
-    }
-
-    if (length > 0 && fread(file->source, 1u, (size_t)length, stream) != (size_t)length) {
-        fclose(stream);
-        ecsvm_set_error(error_message, error_message_capacity, "failed to read source file");
-        ecsvm_diagnostic_set(diagnostic, file->path, 0u, 0u, ECSVM_DIAGNOSTIC_IO, "failed to read source file");
-        return 0;
-    }
-
-    fclose(stream);
-    file->source[length] = '\0';
-    file->length = (size_t)length;
     return 1;
 }
 

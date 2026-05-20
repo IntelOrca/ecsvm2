@@ -6,9 +6,16 @@
 #include <time.h>
 #endif
 
-#include "ecsvm/system_time.h"
+#include "ecsvm/system.h"
 
 #include <string.h>
+
+typedef struct ecsvm_time_system_state {
+    ecsvm_component_id_t time_component;
+    ecsvm_entity_t time_entity;
+    uint64_t previous_tick_ns;
+    int has_previous_tick;
+} ecsvm_time_system_state_t;
 
 static uint64_t ecsvm_time_system_now_ns(void)
 {
@@ -37,15 +44,29 @@ static uint64_t ecsvm_time_system_now_ns(void)
 #endif
 }
 
-static ecsvm_status_t ecsvm_time_system_tick(ecsvm_context_t *ctx)
+static ecsvm_time_system_state_t *ecsvm_time_system_state(ecsvm_engine_t *engine)
 {
-    ecsvm_time_system_t *system;
+    ecsvm_system_t *system;
+
+    if (engine == NULL) {
+        return NULL;
+    }
+
+    system = engine->current_system(engine);
+    return system != NULL
+        ? (ecsvm_time_system_state_t *)system->get_userdata(system)
+        : NULL;
+}
+
+static ecsvm_status_t ecsvm_time_system_main(ecsvm_engine_t *engine)
+{
+    ecsvm_time_system_state_t *system;
     ecsvm_time_component_t *time_component;
     uint64_t now_ns;
     ecsvm_status_t status;
 
-    system = (ecsvm_time_system_t *)ctx->api.userdata;
-    if (ctx == NULL || system == NULL || system->time_component == ECSVM_INVALID_COMPONENT) {
+    system = ecsvm_time_system_state(engine);
+    if (engine == NULL || system == NULL || system->time_component == ECSVM_INVALID_COMPONENT) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
@@ -53,13 +74,13 @@ static ecsvm_status_t ecsvm_time_system_tick(ecsvm_context_t *ctx)
         ecsvm_time_component_t initial_time;
 
         memset(&initial_time, 0, sizeof(initial_time));
-        system->time_entity = ecsvm_entity_create(ctx->engine);
+        system->time_entity = ecsvm_entity_create(engine);
         if (system->time_entity == ECSVM_INVALID_ENTITY) {
             return ECSVM_ERROR_MEMORY;
         }
 
         status = ecsvm_component_set(
-            ctx->engine,
+            engine,
             system->time_component,
             system->time_entity,
             &initial_time
@@ -70,7 +91,7 @@ static ecsvm_status_t ecsvm_time_system_tick(ecsvm_context_t *ctx)
     }
 
     time_component = (ecsvm_time_component_t *)ecsvm_component_get_mutable(
-        ctx->engine,
+        engine,
         system->time_component,
         system->time_entity
     );
@@ -88,33 +109,53 @@ static ecsvm_status_t ecsvm_time_system_tick(ecsvm_context_t *ctx)
     return ECSVM_OK;
 }
 
-void ecsvm_time_system_init(
-    ecsvm_time_system_t *system,
-    ecsvm_component_id_t time_component
-)
+static void ecsvm_time_system_dispose(ecsvm_engine_t *engine, ecsvm_system_t *system)
 {
-    if (system == NULL) {
+    ecsvm_time_system_state_t *state;
+
+    if (engine == NULL || system == NULL) {
         return;
     }
 
-    memset(system, 0, sizeof(*system));
-    system->time_component = time_component;
+    state = (ecsvm_time_system_state_t *)system->get_userdata(system);
+    if (state != NULL) {
+        engine->free(engine, state);
+    }
 }
 
-ecsvm_status_t ecsvm_time_system_register(
-    ecsvm_engine_t *engine,
-    ecsvm_time_system_t *system
-)
+ecsvm_status_t ecsvm_system_time_register(ecsvm_engine_t *engine)
 {
-    ecsvm_system_desc_t desc;
+    ecsvm_system_definition_t definition;
+    ecsvm_time_system_state_t *system;
+    ecsvm_status_t status;
 
-    if (engine == NULL || system == NULL || system->time_component == ECSVM_INVALID_COMPONENT) {
+    if (engine == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    memset(&desc, 0, sizeof(desc));
-    desc.name = "core.Time";
-    desc.callback = ecsvm_time_system_tick;
-    desc.user_data = system;
-    return ecsvm_engine_register_system(engine, &desc, NULL);
+    system = (ecsvm_time_system_state_t *)engine->alloc(engine, sizeof(*system));
+    if (system == NULL) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    memset(system, 0, sizeof(*system));
+    system->time_component = ecsvm_engine_find_component(engine, ECSVM_SYSTEM_TIME_NAME);
+    system->time_entity = ECSVM_INVALID_ENTITY;
+    if (system->time_component == ECSVM_INVALID_COMPONENT) {
+        engine->free(engine, system);
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    memset(&definition, 0, sizeof(definition));
+    definition.name = ECSVM_SYSTEM_TIME_NAME;
+    definition.main = ecsvm_time_system_main;
+    definition.dispose = ecsvm_time_system_dispose;
+    definition.userdata = system;
+    status = engine->register_system(engine, &definition);
+    if (status != ECSVM_OK) {
+        engine->free(engine, system);
+        return status;
+    }
+
+    return ECSVM_OK;
 }

@@ -3,17 +3,21 @@
 #include <stdio.h>
 #include <string.h>
 
-static ecsvm_status_t ecsvm_hotreload_system_tick(ecsvm_context_t *ctx)
+static ecsvm_status_t ecsvm_hotreload_system_tick(ecsvm_engine_t *engine)
 {
     ecsvm_hotreload_system_t *system;
+    ecsvm_system_t *current_system;
     char message[512];
     int changed;
 
-    if (ctx == NULL) {
+    if (engine == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    system = (ecsvm_hotreload_system_t *)ctx->api.userdata;
+    current_system = engine->current_system(engine);
+    system = current_system != NULL
+        ? (ecsvm_hotreload_system_t *)current_system->get_userdata(current_system)
+        : NULL;
     if (system == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
@@ -22,13 +26,13 @@ static ecsvm_status_t ecsvm_hotreload_system_tick(ecsvm_context_t *ctx)
     if (!ecsvm_fswatch_poll(&system->watcher, &changed, message, sizeof(message))) {
         if (message[0] != '\0') {
             (void)snprintf(message, sizeof(message), "hotreload: %s", message);
-            ctx->api.log(ctx->api.userdata, message);
+            engine->log(engine, message);
         }
         return ECSVM_OK;
     }
 
     if (changed && !system->reload_requested) {
-        ctx->api.log(ctx->api.userdata, "hotreload: source change detected");
+        engine->log(engine, "hotreload: source change detected");
         system->reload_requested = 1;
     }
 
@@ -78,15 +82,15 @@ ecsvm_status_t ecsvm_hotreload_system_register(
     ecsvm_hotreload_system_t *system
 )
 {
-    ecsvm_system_desc_t desc;
+    ecsvm_system_definition_t definition;
 
     if (engine == NULL || system == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    memset(&desc, 0, sizeof(desc));
-    desc.name = "__ecsvm.HotReload";
-    desc.callback = ecsvm_hotreload_system_tick;
-    desc.user_data = system;
-    return ecsvm_engine_register_system(engine, &desc, NULL);
+    memset(&definition, 0, sizeof(definition));
+    definition.name = "__ecsvm.HotReload";
+    definition.main = ecsvm_hotreload_system_tick;
+    definition.userdata = system;
+    return ecsvm_engine_register_system(engine, &definition);
 }

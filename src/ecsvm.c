@@ -5,7 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct ecsvm_component_store {
+static ptrdiff_t ecsvm_find_system_index_by_name(
+    const ecsvm_engine_t *engine,
+    const char *name
+);
+
+struct ecsvm_component_store {
     char *name;
     size_t size;
     ecsvm_storage_mode_t storage_mode;
@@ -13,42 +18,13 @@ typedef struct ecsvm_component_store {
     unsigned char *data;
     size_t count;
     size_t capacity;
-} ecsvm_component_store_t;
+};
 
-typedef struct ecsvm_blob_slot {
+struct ecsvm_blob_slot {
     unsigned char *data;
     size_t size;
     int in_use;
     int is_string;
-} ecsvm_blob_slot_t;
-
-struct ecsvm_engine {
-    ecsvm_entity_t next_entity_id;
-    ecsvm_entity_t *entities;
-    size_t entity_count;
-    size_t entity_capacity;
-
-    ecsvm_component_store_t *components;
-    size_t component_count;
-    size_t component_capacity;
-
-    ecsvm_system_entry_t *systems;
-    size_t system_count;
-    size_t system_capacity;
-    size_t *system_pipeline;
-    size_t system_pipeline_count;
-    int pipeline_dirty;
-
-    ecsvm_function_entry_t *functions;
-    size_t function_count;
-    size_t function_capacity;
-
-    ecsvm_blob_slot_t *blobs;
-    size_t blob_count;
-    size_t blob_capacity;
-
-    ecsvm_component_id_t hierarchy_component;
-    int stop_requested;
 };
 
 static void *ecsvm_default_alloc(void *userdata, size_t size)
@@ -69,6 +45,63 @@ static void ecsvm_default_log(void *userdata, const char *message)
     if (message != NULL) {
         fprintf(stderr, "%s\n", message);
     }
+}
+
+void *ecsvm_engine_alloc(ecsvm_engine_t *engine, size_t size)
+{
+    if (engine == NULL || engine->allocator == NULL) {
+        return NULL;
+    }
+
+    return engine->allocator(engine->allocator_userdata, size);
+}
+
+void ecsvm_engine_free(ecsvm_engine_t *engine, void *ptr)
+{
+    if (engine == NULL || engine->deallocator == NULL) {
+        return;
+    }
+
+    engine->deallocator(engine->allocator_userdata, ptr);
+}
+
+void ecsvm_engine_log(ecsvm_engine_t *engine, const char *message)
+{
+    if (engine == NULL || engine->logger == NULL) {
+        return;
+    }
+
+    engine->logger(engine->logger_userdata, message);
+}
+
+ecsvm_system_t *ecsvm_engine_get_system(ecsvm_engine_t *engine, const char *name)
+{
+    ptrdiff_t index;
+
+    index = ecsvm_find_system_index_by_name(engine, name);
+    if (index < 0) {
+        return NULL;
+    }
+
+    return &engine->systems[index];
+}
+
+ecsvm_system_t *ecsvm_engine_current_system(ecsvm_engine_t *engine)
+{
+    if (engine == NULL) {
+        return NULL;
+    }
+
+    return engine->active_system;
+}
+
+void *ecsvm_system_get_userdata(ecsvm_system_t *system)
+{
+    if (system == NULL) {
+        return NULL;
+    }
+
+    return system->userdata;
 }
 
 static void ecsvm_free_string_array(char **items, size_t count)
@@ -116,10 +149,14 @@ static char **ecsvm_copy_string_array(
     return copies;
 }
 
-static void ecsvm_free_system_entry(ecsvm_system_entry_t *entry)
+static void ecsvm_free_system_entry(ecsvm_engine_t *engine, ecsvm_system_t *entry)
 {
     if (entry == NULL) {
         return;
+    }
+
+    if (entry->dispose != NULL) {
+        entry->dispose(engine, entry);
     }
 
     free(entry->name);
@@ -359,7 +396,7 @@ static ecsvm_status_t ecsvm_reserve_component_rows(
 
 static ecsvm_status_t ecsvm_reserve_systems(ecsvm_engine_t *engine, size_t minimum)
 {
-    ecsvm_system_entry_t *systems;
+    ecsvm_system_t *systems;
     size_t capacity;
 
     if (engine == NULL) {
@@ -371,7 +408,7 @@ static ecsvm_status_t ecsvm_reserve_systems(ecsvm_engine_t *engine, size_t minim
     }
 
     capacity = ecsvm_next_capacity(engine->system_capacity, minimum);
-    systems = (ecsvm_system_entry_t *)realloc(engine->systems, capacity * sizeof(*systems));
+    systems = (ecsvm_system_t *)realloc(engine->systems, capacity * sizeof(*systems));
     if (systems == NULL) {
         return ECSVM_ERROR_MEMORY;
     }
@@ -536,6 +573,15 @@ ecsvm_engine_t *ecsvm_engine_create(void)
         return NULL;
     }
 
+    engine->alloc = ecsvm_engine_alloc;
+    engine->free = ecsvm_engine_free;
+    engine->log = ecsvm_engine_log;
+    engine->register_system = ecsvm_engine_register_system;
+    engine->get_system = ecsvm_engine_get_system;
+    engine->current_system = ecsvm_engine_current_system;
+    engine->allocator = ecsvm_default_alloc;
+    engine->deallocator = ecsvm_default_free;
+    engine->logger = ecsvm_default_log;
     engine->next_entity_id = 1u;
     return engine;
 }
@@ -555,7 +601,7 @@ void ecsvm_engine_destroy(ecsvm_engine_t *engine)
     }
 
     for (index = 0u; index < engine->system_count; ++index) {
-        ecsvm_free_system_entry(&engine->systems[index]);
+        ecsvm_free_system_entry(engine, &engine->systems[index]);
     }
 
     for (index = 0u; index < engine->blob_count; ++index) {
@@ -752,25 +798,24 @@ ecsvm_status_t ecsvm_engine_register_component(
 
 ecsvm_status_t ecsvm_engine_register_system(
     ecsvm_engine_t *engine,
-    const ecsvm_system_desc_t *desc,
-    size_t *out_system_index
+    const ecsvm_system_definition_t *definition
 )
 {
-    ecsvm_system_entry_t *entry;
+    ecsvm_system_t *entry;
     char *name;
     ecsvm_status_t status;
 
     if (engine == NULL ||
-        desc == NULL ||
-        desc->name == NULL ||
-        desc->name[0] == '\0' ||
-        desc->callback == NULL ||
-        (desc->before_count > 0u && desc->before == NULL) ||
-        (desc->after_count > 0u && desc->after == NULL)) {
+        definition == NULL ||
+        definition->name == NULL ||
+        definition->name[0] == '\0' ||
+        definition->main == NULL ||
+        (definition->before_count > 0u && definition->before == NULL) ||
+        (definition->after_count > 0u && definition->after == NULL)) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    if (ecsvm_find_system_index_by_name(engine, desc->name) >= 0) {
+    if (ecsvm_find_system_index_by_name(engine, definition->name) >= 0) {
         return ECSVM_ERROR_EXISTS;
     }
 
@@ -779,7 +824,7 @@ ecsvm_status_t ecsvm_engine_register_system(
         return status;
     }
 
-    name = ecsvm_copy_string(desc->name);
+    name = ecsvm_copy_string(definition->name);
     if (name == NULL) {
         return ECSVM_ERROR_MEMORY;
     }
@@ -787,17 +832,18 @@ ecsvm_status_t ecsvm_engine_register_system(
     entry = &engine->systems[engine->system_count];
     memset(entry, 0, sizeof(*entry));
     entry->name = name;
-    entry->callback = desc->callback;
-    entry->api.alloc = desc->alloc != NULL ? desc->alloc : ecsvm_default_alloc;
-    entry->api.free = desc->free != NULL ? desc->free : ecsvm_default_free;
-    entry->api.log = desc->log != NULL ? desc->log : ecsvm_default_log;
-    entry->api.userdata = desc->user_data;
-    entry->before = ecsvm_copy_string_array(desc->before, desc->before_count);
-    entry->before_count = desc->before_count;
-    entry->after = ecsvm_copy_string_array(desc->after, desc->after_count);
-    entry->after_count = desc->after_count;
-    if ((desc->before_count > 0u && entry->before == NULL) ||
-        (desc->after_count > 0u && entry->after == NULL)) {
+    entry->main = definition->main;
+    entry->dispose = definition->dispose;
+    entry->get_userdata = definition->get_userdata != NULL
+        ? definition->get_userdata
+        : ecsvm_system_get_userdata;
+    entry->userdata = definition->userdata;
+    entry->before = ecsvm_copy_string_array(definition->before, definition->before_count);
+    entry->before_count = definition->before_count;
+    entry->after = ecsvm_copy_string_array(definition->after, definition->after_count);
+    entry->after_count = definition->after_count;
+    if ((definition->before_count > 0u && entry->before == NULL) ||
+        (definition->after_count > 0u && entry->after == NULL)) {
         ecsvm_free_string_array(entry->before, entry->before_count);
         ecsvm_free_string_array(entry->after, entry->after_count);
         free(entry->name);
@@ -806,10 +852,6 @@ ecsvm_status_t ecsvm_engine_register_system(
     }
     engine->system_count += 1u;
     engine->pipeline_dirty = 1;
-
-    if (out_system_index != NULL) {
-        *out_system_index = engine->system_count - 1u;
-    }
 
     return ECSVM_OK;
 }
@@ -829,7 +871,12 @@ ecsvm_status_t ecsvm_engine_unregister_system(ecsvm_engine_t *engine, const char
     }
 
     remove_index = (size_t)index;
-    ecsvm_free_system_entry(&engine->systems[remove_index]);
+    if (engine->active_system == &engine->systems[remove_index]) {
+        engine->active_system = NULL;
+        engine->current_system_name = NULL;
+        engine->current_system_index = 0u;
+    }
+    ecsvm_free_system_entry(engine, &engine->systems[remove_index]);
     if (remove_index + 1u < engine->system_count) {
         memmove(
             &engine->systems[remove_index],
@@ -846,16 +893,12 @@ ecsvm_status_t ecsvm_engine_unregister_system(ecsvm_engine_t *engine, const char
 
 ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine)
 {
-    ecsvm_context_t context;
     ecsvm_status_t status;
     size_t index;
 
     if (engine == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
-
-    memset(&context, 0, sizeof(context));
-    context.engine = engine;
 
     status = ecsvm_engine_ensure_pipeline(engine);
     if (status != ECSVM_OK) {
@@ -864,18 +907,26 @@ ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine)
 
     for (index = 0u; index < engine->system_pipeline_count; ++index) {
         size_t system_index;
+        ecsvm_system_t *system;
 
         system_index = engine->system_pipeline[index];
-        context.system_index = index;
-        context.system_name = engine->systems[system_index].name;
-        context.api = engine->systems[system_index].api;
+        system = &engine->systems[system_index];
+        engine->active_system = system;
+        engine->current_system_name = system->name;
+        engine->current_system_index = index;
 
-        status = engine->systems[system_index].callback(&context);
+        status = system->main(engine);
         if (status != ECSVM_OK) {
+            engine->active_system = NULL;
+            engine->current_system_name = NULL;
+            engine->current_system_index = 0u;
             return status == ECSVM_OK ? ECSVM_ERROR_CALLBACK : status;
         }
     }
 
+    engine->active_system = NULL;
+    engine->current_system_name = NULL;
+    engine->current_system_index = 0u;
     return ECSVM_OK;
 }
 

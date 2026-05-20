@@ -1,40 +1,21 @@
-#include "ecsvm/system_window.h"
-#include "ecsvm/component.h"
+#include "ecsvm/system.h"
 
-#include <stdbool.h>
+#include "system_window_internal.h"
+
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <SDL3/SDL.h>
 
-struct ecsvm_window_system {
-    char *title;
-    int width;
-    int height;
-    uint64_t window_flags;
-    ecsvm_native_window_t *window;
-    ecsvm_native_renderer_t *renderer;
-    Uint64 previous_counter;
-    float delta_seconds;
-    ecsvm_component_id_t window_component;
-    ecsvm_component_id_t input_monitor_component;
-    ecsvm_entity_t window_entity;
-    bool initialized;
-    bool close_pending;
-    bool should_close;
-};
-
-static char *window_copy_string(const char *text)
+static char *window_copy_string(ecsvm_engine_t *engine, const char *text)
 {
     char *copy;
     size_t length;
 
-    if (text == NULL) {
+    if (engine == NULL || text == NULL) {
         return NULL;
     }
 
     length = strlen(text);
-    copy = (char *)malloc(length + 1u);
+    copy = (char *)engine->alloc(engine, length + 1u);
     if (copy == NULL) {
         return NULL;
     }
@@ -43,18 +24,36 @@ static char *window_copy_string(const char *text)
     return copy;
 }
 
-static void window_log_error(ecsvm_context_t *ctx, const char *prefix)
+static ecsvm_window_system_state_t *ecsvm_window_system_state(ecsvm_engine_t *engine)
+{
+    ecsvm_system_t *system;
+
+    if (engine == NULL) {
+        return NULL;
+    }
+
+    system = engine->current_system(engine);
+    return system != NULL
+        ? (ecsvm_window_system_state_t *)system->get_userdata(system)
+        : NULL;
+}
+
+static void window_log_error(ecsvm_engine_t *engine, const char *prefix)
 {
     char message[512];
 
+    if (engine == NULL) {
+        return;
+    }
+
     (void)snprintf(message, sizeof(message), "%s: %s", prefix, SDL_GetError());
-    ctx->api.log(ctx->api.userdata, message);
+    engine->log(engine, message);
 }
 
-static bool window_initialize(ecsvm_context_t *ctx, ecsvm_window_system_t *system)
+static bool window_initialize(ecsvm_engine_t *engine, ecsvm_window_system_state_t *system)
 {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        window_log_error(ctx, "SDL_Init failed");
+        window_log_error(engine, "SDL_Init failed");
         return false;
     }
 
@@ -66,7 +65,7 @@ static bool window_initialize(ecsvm_context_t *ctx, ecsvm_window_system_t *syste
             &system->window,
             &system->renderer
         )) {
-        window_log_error(ctx, "SDL_CreateWindowAndRenderer failed");
+        window_log_error(engine, "SDL_CreateWindowAndRenderer failed");
         SDL_Quit();
         return false;
     }
@@ -102,22 +101,22 @@ static ecsvm_entity_t window_find_component_entity(
 }
 
 static ecsvm_window_component_t *window_ensure_component(
-    ecsvm_context_t *ctx,
-    ecsvm_window_system_t *system
+    ecsvm_engine_t *engine,
+    ecsvm_window_system_state_t *system
 )
 {
     ecsvm_window_component_t initial;
 
     if (system->window_component == ECSVM_INVALID_COMPONENT) {
-        system->window_component = ecsvm_engine_find_component(ctx->engine, "core.ui.Window");
+        system->window_component = ecsvm_engine_find_component(engine, "core.ui.Window");
     }
     if (system->window_component == ECSVM_INVALID_COMPONENT) {
         return NULL;
     }
 
     if (system->window_entity == ECSVM_INVALID_ENTITY ||
-        !ecsvm_component_has(ctx->engine, system->window_component, system->window_entity)) {
-        system->window_entity = window_find_component_entity(ctx->engine, system->window_component);
+        !ecsvm_component_has(engine, system->window_component, system->window_entity)) {
+        system->window_entity = window_find_component_entity(engine, system->window_component);
     }
 
     if (system->window_entity == ECSVM_INVALID_ENTITY) {
@@ -127,10 +126,10 @@ static ecsvm_window_component_t *window_ensure_component(
         initial.delta_seconds = system->delta_seconds;
         initial.closing = 0u;
 
-        system->window_entity = ecsvm_entity_create(ctx->engine);
+        system->window_entity = ecsvm_entity_create(engine);
         if (system->window_entity == ECSVM_INVALID_ENTITY ||
             ecsvm_component_set(
-                ctx->engine,
+                engine,
                 system->window_component,
                 system->window_entity,
                 &initial
@@ -141,7 +140,7 @@ static ecsvm_window_component_t *window_ensure_component(
     }
 
     return (ecsvm_window_component_t *)ecsvm_component_get_mutable(
-        ctx->engine,
+        engine,
         system->window_component,
         system->window_entity
     );
@@ -207,7 +206,10 @@ static float window_monitor_value(
     return 0.0f;
 }
 
-static ecsvm_status_t window_update_input_monitors(ecsvm_context_t *ctx, ecsvm_window_system_t *system)
+static ecsvm_status_t window_update_input_monitors(
+    ecsvm_engine_t *engine,
+    ecsvm_window_system_state_t *system
+)
 {
     size_t index;
     int keyboard_count;
@@ -219,7 +221,7 @@ static ecsvm_status_t window_update_input_monitors(ecsvm_context_t *ctx, ecsvm_w
 
     if (system->input_monitor_component == ECSVM_INVALID_COMPONENT) {
         system->input_monitor_component = ecsvm_engine_find_component(
-            ctx->engine,
+            engine,
             "core.input.InputMonitor"
         );
     }
@@ -230,18 +232,18 @@ static ecsvm_status_t window_update_input_monitors(ecsvm_context_t *ctx, ecsvm_w
     keyboard_state = SDL_GetKeyboardState(&keyboard_count);
     mouse_buttons = SDL_GetMouseState(&mouse_x, &mouse_y);
     mouse_in_window = SDL_GetMouseFocus() == system->window;
-    for (index = 0u; index < ecsvm_entity_count(ctx->engine); ++index) {
+    for (index = 0u; index < ecsvm_entity_count(engine); ++index) {
         ecsvm_entity_t entity;
         ecsvm_input_monitor_component_t *monitor;
 
-        entity = ecsvm_entity_at(ctx->engine, index);
+        entity = ecsvm_entity_at(engine, index);
         if (entity == ECSVM_INVALID_ENTITY ||
-            !ecsvm_component_has(ctx->engine, system->input_monitor_component, entity)) {
+            !ecsvm_component_has(engine, system->input_monitor_component, entity)) {
             continue;
         }
 
         monitor = (ecsvm_input_monitor_component_t *)ecsvm_component_get_mutable(
-            ctx->engine,
+            engine,
             system->input_monitor_component,
             entity
         );
@@ -266,9 +268,9 @@ static ecsvm_status_t window_update_input_monitors(ecsvm_context_t *ctx, ecsvm_w
     return ECSVM_OK;
 }
 
-static ecsvm_status_t ecsvm_window_system_tick(ecsvm_context_t *ctx)
+static ecsvm_status_t ecsvm_window_system_main(ecsvm_engine_t *engine)
 {
-    ecsvm_window_system_t *system;
+    ecsvm_window_system_state_t *system;
     ecsvm_window_component_t *window_component;
     SDL_Event event;
     Uint64 current_counter;
@@ -278,12 +280,12 @@ static ecsvm_status_t ecsvm_window_system_tick(ecsvm_context_t *ctx)
     int escape_index;
     const bool *keyboard_state;
 
-    system = (ecsvm_window_system_t *)ctx->api.userdata;
+    system = ecsvm_window_system_state(engine);
     if (system == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    if (!system->initialized && !window_initialize(ctx, system)) {
+    if (!system->initialized && !window_initialize(engine, system)) {
         return ECSVM_ERROR_CALLBACK;
     }
 
@@ -314,11 +316,11 @@ static ecsvm_status_t ecsvm_window_system_tick(ecsvm_context_t *ctx)
 
     system->previous_counter = current_counter;
     if (!SDL_GetWindowSize(system->window, &system->width, &system->height)) {
-        window_log_error(ctx, "SDL_GetWindowSize failed");
+        window_log_error(engine, "SDL_GetWindowSize failed");
         return ECSVM_ERROR_CALLBACK;
     }
 
-    window_component = window_ensure_component(ctx, system);
+    window_component = window_ensure_component(engine, system);
     if (system->window_component != ECSVM_INVALID_COMPONENT && window_component == NULL) {
         return ECSVM_ERROR_CALLBACK;
     }
@@ -326,7 +328,7 @@ static ecsvm_status_t ecsvm_window_system_tick(ecsvm_context_t *ctx)
     if (window_component != NULL) {
         if (system->close_pending && window_component->closing) {
             system->should_close = true;
-            ecsvm_engine_request_stop(ctx->engine);
+            ecsvm_engine_request_stop(engine);
         }
 
         window_component->width = system->width;
@@ -340,136 +342,88 @@ static ecsvm_status_t ecsvm_window_system_tick(ecsvm_context_t *ctx)
     } else if (close_requested) {
         system->should_close = true;
         system->close_pending = true;
-        ecsvm_engine_request_stop(ctx->engine);
+        ecsvm_engine_request_stop(engine);
     } else {
         system->close_pending = false;
     }
 
-    if (window_update_input_monitors(ctx, system) != ECSVM_OK) {
+    if (window_update_input_monitors(engine, system) != ECSVM_OK) {
         return ECSVM_ERROR_CALLBACK;
     }
 
     return ECSVM_OK;
 }
 
-ecsvm_window_system_t *ecsvm_window_system_create(const ecsvm_window_config_t *config)
+static void ecsvm_window_system_dispose(ecsvm_engine_t *engine, ecsvm_system_t *system)
 {
-    ecsvm_window_system_t *system;
+    ecsvm_window_system_state_t *state;
 
-    if (config == NULL || config->title == NULL || config->width <= 0 || config->height <= 0) {
-        return NULL;
+    if (engine == NULL || system == NULL) {
+        return;
     }
 
-    system = (ecsvm_window_system_t *)calloc(1u, sizeof(*system));
+    state = (ecsvm_window_system_state_t *)system->get_userdata(system);
+    if (state == NULL) {
+        return;
+    }
+
+    if (state->renderer != NULL) {
+        SDL_DestroyRenderer(state->renderer);
+    }
+
+    if (state->window != NULL) {
+        SDL_DestroyWindow(state->window);
+    }
+
+    if (state->initialized) {
+        SDL_Quit();
+    }
+
+    engine->free(engine, state->title);
+    engine->free(engine, state);
+}
+
+ecsvm_status_t ecsvm_system_window_register(ecsvm_engine_t *engine)
+{
+    static const char default_title[] = "ecsvm";
+    ecsvm_system_definition_t definition;
+    ecsvm_window_system_state_t *system;
+    ecsvm_status_t status;
+
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    system = (ecsvm_window_system_state_t *)engine->alloc(engine, sizeof(*system));
     if (system == NULL) {
-        return NULL;
+        return ECSVM_ERROR_MEMORY;
     }
 
-    system->title = window_copy_string(config->title);
+    memset(system, 0, sizeof(*system));
+    system->title = window_copy_string(engine, default_title);
     if (system->title == NULL) {
-        free(system);
-        return NULL;
+        engine->free(engine, system);
+        return ECSVM_ERROR_MEMORY;
     }
 
-    system->width = config->width;
-    system->height = config->height;
-    system->window_flags = config->window_flags;
+    system->width = 960;
+    system->height = 540;
     system->delta_seconds = 1.0f / 60.0f;
     system->window_component = ECSVM_INVALID_COMPONENT;
     system->input_monitor_component = ECSVM_INVALID_COMPONENT;
     system->window_entity = ECSVM_INVALID_ENTITY;
-    return system;
-}
 
-void ecsvm_window_system_destroy(ecsvm_window_system_t *system)
-{
-    if (system == NULL) {
-        return;
+    memset(&definition, 0, sizeof(definition));
+    definition.name = ECSVM_SYSTEM_WINDOW_NAME;
+    definition.main = ecsvm_window_system_main;
+    definition.dispose = ecsvm_window_system_dispose;
+    definition.userdata = system;
+    status = engine->register_system(engine, &definition);
+    if (status != ECSVM_OK) {
+        engine->free(engine, system->title);
+        engine->free(engine, system);
+        return status;
     }
 
-    if (system->renderer != NULL) {
-        SDL_DestroyRenderer(system->renderer);
-    }
-
-    if (system->window != NULL) {
-        SDL_DestroyWindow(system->window);
-    }
-
-    if (system->initialized) {
-        SDL_Quit();
-    }
-
-    free(system->title);
-    free(system);
-}
-
-ecsvm_status_t ecsvm_window_system_register(
-    ecsvm_engine_t *engine,
-    ecsvm_window_system_t *system
-)
-{
-    ecsvm_system_desc_t desc;
-
-    if (engine == NULL || system == NULL) {
-        return ECSVM_ERROR_ARGUMENT;
-    }
-
-    memset(&desc, 0, sizeof(desc));
-    desc.name = "core.Window";
-    desc.callback = ecsvm_window_system_tick;
-    desc.user_data = system;
-    return ecsvm_engine_register_system(engine, &desc, NULL);
-}
-
-int ecsvm_window_system_should_close(const ecsvm_window_system_t *system)
-{
-    if (system == NULL) {
-        return 1;
-    }
-
-    return system->should_close ? 1 : 0;
-}
-
-float ecsvm_window_system_delta_seconds(const ecsvm_window_system_t *system)
-{
-    if (system == NULL) {
-        return 1.0f / 60.0f;
-    }
-
-    return system->delta_seconds;
-}
-
-int ecsvm_window_system_size(const ecsvm_window_system_t *system, int *width, int *height)
-{
-    if (system == NULL) {
-        return 0;
-    }
-
-    if (width != NULL) {
-        *width = system->width;
-    }
-
-    if (height != NULL) {
-        *height = system->height;
-    }
-
-    return 1;
-}
-
-ecsvm_native_window_t *ecsvm_window_system_window(const ecsvm_window_system_t *system)
-{
-    if (system == NULL) {
-        return NULL;
-    }
-
-    return system->window;
-}
-
-ecsvm_native_renderer_t *ecsvm_window_system_renderer(const ecsvm_window_system_t *system)
-{
-    if (system == NULL) {
-        return NULL;
-    }
-
-    return system->renderer;
+    return ECSVM_OK;
 }

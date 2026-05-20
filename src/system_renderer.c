@@ -1,24 +1,55 @@
-#include "ecsvm/system_renderer.h"
+#include "ecsvm/system.h"
 
-#include <SDL3/SDL.h>
+#include "system_window_internal.h"
 
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-struct ecsvm_renderer_system {
-    ecsvm_window_system_t *window_system;
-    ecsvm_renderer_config_t config;
-};
+typedef struct ecsvm_renderer_system_state {
+    ecsvm_core_components_t components;
+    ecsvm_vec4_t clear_color;
+} ecsvm_renderer_system_state_t;
 
-static void renderer_log_error(ecsvm_context_t *ctx, const char *prefix)
+static ecsvm_renderer_system_state_t *ecsvm_renderer_system_state(ecsvm_engine_t *engine)
+{
+    ecsvm_system_t *system;
+
+    if (engine == NULL) {
+        return NULL;
+    }
+
+    system = engine->current_system(engine);
+    return system != NULL
+        ? (ecsvm_renderer_system_state_t *)system->get_userdata(system)
+        : NULL;
+}
+
+static ecsvm_window_system_state_t *ecsvm_renderer_window_system(ecsvm_engine_t *engine)
+{
+    ecsvm_system_t *system;
+
+    if (engine == NULL) {
+        return NULL;
+    }
+
+    system = engine->get_system(engine, ECSVM_SYSTEM_WINDOW_NAME);
+    return system != NULL
+        ? (ecsvm_window_system_state_t *)system->get_userdata(system)
+        : NULL;
+}
+
+static void renderer_log_error(ecsvm_engine_t *engine, const char *prefix)
 {
     char message[512];
 
+    if (engine == NULL) {
+        return;
+    }
+
     (void)snprintf(message, sizeof(message), "%s: %s", prefix, SDL_GetError());
-    ctx->api.log(ctx->api.userdata, message);
+    engine->log(engine, message);
 }
 
 static bool renderer_draw_rectangle(
@@ -127,7 +158,7 @@ static void renderer_compose_transform(
 
 static bool renderer_resolve_transform(
     const ecsvm_engine_t *engine,
-    const ecsvm_renderer_config_t *config,
+    const ecsvm_renderer_system_state_t *config,
     ecsvm_entity_t entity,
     size_t depth_limit,
     ecsvm_transform_component_t *out_transform
@@ -178,55 +209,57 @@ static bool renderer_resolve_transform(
     return true;
 }
 
-static ecsvm_status_t ecsvm_renderer_system_tick(ecsvm_context_t *ctx)
+static ecsvm_status_t ecsvm_renderer_system_main(ecsvm_engine_t *engine)
 {
-    ecsvm_renderer_system_t *system;
+    ecsvm_renderer_system_state_t *system;
+    ecsvm_window_system_state_t *window_system;
     SDL_Renderer *renderer;
     size_t index;
 
-    system = (ecsvm_renderer_system_t *)ctx->api.userdata;
-    if (system == NULL) {
+    system = ecsvm_renderer_system_state(engine);
+    window_system = ecsvm_renderer_window_system(engine);
+    if (system == NULL || window_system == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    renderer = ecsvm_window_system_renderer(system->window_system);
+    renderer = window_system->renderer;
     if (renderer == NULL) {
         return ECSVM_OK;
     }
 
     if (!SDL_SetRenderDrawColorFloat(
             renderer,
-            system->config.clear_color.x,
-            system->config.clear_color.y,
-            system->config.clear_color.z,
-            system->config.clear_color.w
+            system->clear_color.x,
+            system->clear_color.y,
+            system->clear_color.z,
+            system->clear_color.w
         )) {
-        renderer_log_error(ctx, "SDL_SetRenderDrawColorFloat failed");
+        renderer_log_error(engine, "SDL_SetRenderDrawColorFloat failed");
         return ECSVM_ERROR_CALLBACK;
     }
 
     if (!SDL_RenderClear(renderer)) {
-        renderer_log_error(ctx, "SDL_RenderClear failed");
+        renderer_log_error(engine, "SDL_RenderClear failed");
         return ECSVM_ERROR_CALLBACK;
     }
 
-    for (index = 0u; index < ecsvm_entity_count(ctx->engine); ++index) {
+    for (index = 0u; index < ecsvm_entity_count(engine); ++index) {
         ecsvm_entity_t entity;
         ecsvm_transform_component_t transform;
         const ecsvm_graphics_shape_component_t *shape;
 
-        entity = ecsvm_entity_at(ctx->engine, index);
+        entity = ecsvm_entity_at(engine, index);
         shape = (const ecsvm_graphics_shape_component_t *)ecsvm_component_get(
-            ctx->engine,
-            system->config.components.graphics_shape,
+            engine,
+            system->components.graphics_shape,
             entity
         );
         if (shape == NULL ||
             !renderer_resolve_transform(
-                ctx->engine,
-                &system->config,
+                engine,
+                system,
                 entity,
-                ecsvm_entity_count(ctx->engine),
+                ecsvm_entity_count(engine),
                 &transform
             )) {
             continue;
@@ -234,65 +267,85 @@ static ecsvm_status_t ecsvm_renderer_system_tick(ecsvm_context_t *ctx)
 
         if (shape->kind == ECSVM_SHAPE_RECTANGLE) {
             if (!renderer_draw_rectangle(renderer, &transform, shape)) {
-                renderer_log_error(ctx, "SDL_RenderGeometry failed");
+                renderer_log_error(engine, "SDL_RenderGeometry failed");
                 return ECSVM_ERROR_CALLBACK;
             }
         } else if (shape->kind == ECSVM_SHAPE_CIRCLE) {
             if (!renderer_draw_circle(renderer, &transform, shape)) {
-                renderer_log_error(ctx, "SDL_RenderGeometry failed");
+                renderer_log_error(engine, "SDL_RenderGeometry failed");
                 return ECSVM_ERROR_CALLBACK;
             }
         }
     }
 
     if (!SDL_RenderPresent(renderer)) {
-        renderer_log_error(ctx, "SDL_RenderPresent failed");
+        renderer_log_error(engine, "SDL_RenderPresent failed");
         return ECSVM_ERROR_CALLBACK;
     }
 
     return ECSVM_OK;
 }
 
-ecsvm_renderer_system_t *ecsvm_renderer_system_create(
-    ecsvm_window_system_t *window_system,
-    const ecsvm_renderer_config_t *config
-)
+static void ecsvm_renderer_system_dispose(ecsvm_engine_t *engine, ecsvm_system_t *system)
 {
-    ecsvm_renderer_system_t *system;
-
-    if (window_system == NULL || config == NULL) {
-        return NULL;
-    }
-
-    system = (ecsvm_renderer_system_t *)calloc(1u, sizeof(*system));
-    if (system == NULL) {
-        return NULL;
-    }
-
-    system->window_system = window_system;
-    system->config = *config;
-    return system;
-}
-
-void ecsvm_renderer_system_destroy(ecsvm_renderer_system_t *system)
-{
-    free(system);
-}
-
-ecsvm_status_t ecsvm_renderer_system_register(
-    ecsvm_engine_t *engine,
-    ecsvm_renderer_system_t *system
-)
-{
-    ecsvm_system_desc_t desc;
+    ecsvm_renderer_system_state_t *state;
 
     if (engine == NULL || system == NULL) {
+        return;
+    }
+
+    state = (ecsvm_renderer_system_state_t *)system->get_userdata(system);
+    if (state != NULL) {
+        engine->free(engine, state);
+    }
+}
+
+ecsvm_status_t ecsvm_system_renderer_register(ecsvm_engine_t *engine)
+{
+    static const char *const after_names[] = {
+        ECSVM_SYSTEM_WINDOW_NAME
+    };
+    ecsvm_system_definition_t definition;
+    ecsvm_renderer_system_state_t *system;
+    ecsvm_status_t status;
+
+    if (engine == NULL || engine->get_system(engine, ECSVM_SYSTEM_WINDOW_NAME) == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
 
-    memset(&desc, 0, sizeof(desc));
-    desc.name = "core.Renderer";
-    desc.callback = ecsvm_renderer_system_tick;
-    desc.user_data = system;
-    return ecsvm_engine_register_system(engine, &desc, NULL);
+    system = (ecsvm_renderer_system_state_t *)engine->alloc(engine, sizeof(*system));
+    if (system == NULL) {
+        return ECSVM_ERROR_MEMORY;
+    }
+
+    memset(system, 0, sizeof(*system));
+    system->components.hierarchy = ecsvm_engine_hierarchy_component(engine);
+    system->components.transform = ecsvm_engine_find_component(engine, "core.Transform");
+    system->components.time = ecsvm_engine_find_component(engine, "core.Time");
+    system->components.graphics_shape = ecsvm_engine_find_component(engine, "core.graphics.GraphicsShape");
+    if (system->components.transform == ECSVM_INVALID_COMPONENT ||
+        system->components.graphics_shape == ECSVM_INVALID_COMPONENT) {
+        engine->free(engine, system);
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    system->clear_color.x = 0.05f;
+    system->clear_color.y = 0.05f;
+    system->clear_color.z = 0.08f;
+    system->clear_color.w = 1.0f;
+
+    memset(&definition, 0, sizeof(definition));
+    definition.name = ECSVM_SYSTEM_RENDERER_NAME;
+    definition.main = ecsvm_renderer_system_main;
+    definition.dispose = ecsvm_renderer_system_dispose;
+    definition.userdata = system;
+    definition.after = after_names;
+    definition.after_count = sizeof(after_names) / sizeof(after_names[0]);
+    status = engine->register_system(engine, &definition);
+    if (status != ECSVM_OK) {
+        engine->free(engine, system);
+        return status;
+    }
+
+    return ECSVM_OK;
 }

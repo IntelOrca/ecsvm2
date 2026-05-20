@@ -4,7 +4,7 @@
 #include <string.h>
 
 static ptrdiff_t ecsvm_pipeline_find_system(
-    const ecsvm_system_entry_t *systems,
+    const ecsvm_system_t *systems,
     size_t system_count,
     const char *name
 )
@@ -53,7 +53,7 @@ static int ecsvm_pipeline_add_edge(
 }
 
 ecsvm_status_t ecsvm_pipeline_build(
-    const ecsvm_system_entry_t *systems,
+    const ecsvm_system_t *systems,
     size_t system_count,
     size_t **out_order,
     size_t *out_count

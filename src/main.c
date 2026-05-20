@@ -24,22 +24,26 @@ static demo_components_t g_demo_components;
 int ecsvm_run_ecsbin(const char *ecsbin_path);
 int ecsvm_run_project(const char *project_path, const char *core_library_path, const char *ecsbin_path);
 
-static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
+static ecsvm_status_t demo_gravity(ecsvm_engine_t *engine)
 {
     const float gravity = -9.8f;
     size_t index;
 
-    for (index = 0u; index < ecsvm_entity_count(ctx->engine); ++index) {
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    for (index = 0u; index < ecsvm_entity_count(engine); ++index) {
         ecsvm_entity_t entity;
         vec3_t *velocity;
 
-        entity = ecsvm_entity_at(ctx->engine, index);
-        if (!ecsvm_component_has(ctx->engine, g_demo_components.velocity, entity)) {
+        entity = ecsvm_entity_at(engine, index);
+        if (!ecsvm_component_has(engine, g_demo_components.velocity, entity)) {
             continue;
         }
 
         velocity = (vec3_t *)ecsvm_component_get_mutable(
-            ctx->engine,
+            engine,
             g_demo_components.velocity,
             entity
         );
@@ -50,32 +54,36 @@ static ecsvm_status_t demo_gravity(ecsvm_context_t *ctx)
         velocity->y += gravity;
     }
 
-    ctx->api.log(ctx->api.userdata, "gravity complete");
+    engine->log(engine, "gravity complete");
     return ECSVM_OK;
 }
 
-static ecsvm_status_t demo_integrate(ecsvm_context_t *ctx)
+static ecsvm_status_t demo_integrate(ecsvm_engine_t *engine)
 {
     size_t index;
 
-    for (index = 0u; index < ecsvm_entity_count(ctx->engine); ++index) {
+    if (engine == NULL) {
+        return ECSVM_ERROR_ARGUMENT;
+    }
+
+    for (index = 0u; index < ecsvm_entity_count(engine); ++index) {
         ecsvm_entity_t entity;
         vec3_t *position;
         const vec3_t *velocity;
 
-        entity = ecsvm_entity_at(ctx->engine, index);
-        if (!ecsvm_component_has(ctx->engine, g_demo_components.position, entity) ||
-            !ecsvm_component_has(ctx->engine, g_demo_components.velocity, entity)) {
+        entity = ecsvm_entity_at(engine, index);
+        if (!ecsvm_component_has(engine, g_demo_components.position, entity) ||
+            !ecsvm_component_has(engine, g_demo_components.velocity, entity)) {
             continue;
         }
 
         position = (vec3_t *)ecsvm_component_get_mutable(
-            ctx->engine,
+            engine,
             g_demo_components.position,
             entity
         );
         velocity = (const vec3_t *)ecsvm_component_get(
-            ctx->engine,
+            engine,
             g_demo_components.velocity,
             entity
         );
@@ -88,7 +96,7 @@ static ecsvm_status_t demo_integrate(ecsvm_context_t *ctx)
         position->z += velocity->z;
     }
 
-    ctx->api.log(ctx->api.userdata, "integrate complete");
+    engine->log(engine, "integrate complete");
     return ECSVM_OK;
 }
 
@@ -277,8 +285,8 @@ static int run_self_test(void)
 {
     ecsvm_component_desc_t position_desc;
     ecsvm_component_desc_t velocity_desc;
-    ecsvm_system_desc_t gravity_desc;
-    ecsvm_system_desc_t integrate_desc;
+    ecsvm_system_definition_t gravity_desc;
+    ecsvm_system_definition_t integrate_desc;
     ecsvm_engine_t *engine;
     vec3_t position;
     vec3_t velocity;
@@ -324,27 +332,19 @@ static int run_self_test(void)
     memset(&integrate_desc, 0, sizeof(integrate_desc));
 
     gravity_desc.name = "app.gravity";
-    gravity_desc.callback = demo_gravity;
-    gravity_desc.alloc = NULL;
-    gravity_desc.free = NULL;
-    gravity_desc.log = NULL;
-    gravity_desc.user_data = NULL;
+    gravity_desc.main = demo_gravity;
 
     integrate_desc.name = "app.integrate";
-    integrate_desc.callback = demo_integrate;
-    integrate_desc.alloc = NULL;
-    integrate_desc.free = NULL;
-    integrate_desc.log = NULL;
-    integrate_desc.user_data = NULL;
+    integrate_desc.main = demo_integrate;
 
-    status = ecsvm_engine_register_system(engine, &gravity_desc, NULL);
+    status = ecsvm_engine_register_system(engine, &gravity_desc);
     if (status != ECSVM_OK) {
         fprintf(stderr, "failed to register gravity: %s\n", ecsvm_status_string(status));
         ecsvm_engine_destroy(engine);
         return 1;
     }
 
-    status = ecsvm_engine_register_system(engine, &integrate_desc, NULL);
+    status = ecsvm_engine_register_system(engine, &integrate_desc);
     if (status != ECSVM_OK) {
         fprintf(stderr, "failed to register integrate: %s\n", ecsvm_status_string(status));
         ecsvm_engine_destroy(engine);

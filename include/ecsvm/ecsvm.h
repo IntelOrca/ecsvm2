@@ -36,12 +36,17 @@ typedef enum ecsvm_storage_mode {
 } ecsvm_storage_mode_t;
 
 typedef struct ecsvm_engine ecsvm_engine_t;
-typedef struct ecsvm_context ecsvm_context_t;
+typedef struct ecsvm_system ecsvm_system_t;
+typedef struct ecsvm_component_store ecsvm_component_store_t;
+typedef struct ecsvm_function_entry ecsvm_function_entry_t;
+typedef struct ecsvm_blob_slot ecsvm_blob_slot_t;
 
 typedef void *(*ecsvm_alloc_fn)(void *userdata, size_t size);
 typedef void (*ecsvm_free_fn)(void *userdata, void *ptr);
 typedef void (*ecsvm_log_fn)(void *userdata, const char *message);
-typedef ecsvm_status_t (*ecsvm_system_fn)(ecsvm_context_t *ctx);
+typedef ecsvm_status_t (*ecsvm_system_fn)(ecsvm_engine_t *engine);
+typedef void (*ecsvm_system_dispose_fn)(ecsvm_engine_t *engine, ecsvm_system_t *system);
+typedef void *(*ecsvm_system_get_userdata_fn)(ecsvm_system_t *system);
 
 typedef struct ecsvm_component_desc {
     const char *name;
@@ -49,25 +54,29 @@ typedef struct ecsvm_component_desc {
     ecsvm_storage_mode_t preferred_storage;
 } ecsvm_component_desc_t;
 
-typedef struct ecsvm_system_api {
-    ecsvm_alloc_fn alloc;
-    ecsvm_free_fn free;
-    ecsvm_log_fn log;
-    void *userdata;
-} ecsvm_system_api_t;
-
-typedef struct ecsvm_system_desc {
+typedef struct ecsvm_system_definition {
     const char *name;
-    ecsvm_system_fn callback;
-    ecsvm_alloc_fn alloc;
-    ecsvm_free_fn free;
-    ecsvm_log_fn log;
-    void *user_data;
+    ecsvm_system_fn main;
+    ecsvm_system_dispose_fn dispose;
+    ecsvm_system_get_userdata_fn get_userdata;
+    void *userdata;
     const char *const *before;
     size_t before_count;
     const char *const *after;
     size_t after_count;
-} ecsvm_system_desc_t;
+} ecsvm_system_definition_t;
+
+struct ecsvm_system {
+    char *name;
+    ecsvm_system_fn main;
+    ecsvm_system_dispose_fn dispose;
+    ecsvm_system_get_userdata_fn get_userdata;
+    void *userdata;
+    char **before;
+    size_t before_count;
+    char **after;
+    size_t after_count;
+};
 
 typedef struct ecsvm_hierarchy_component {
     ecsvm_entity_t parent;
@@ -75,15 +84,63 @@ typedef struct ecsvm_hierarchy_component {
     ecsvm_entity_t next_sibling;
 } ecsvm_hierarchy_component_t;
 
-struct ecsvm_context {
-    ecsvm_engine_t *engine;
-    size_t system_index;
-    const char *system_name;
-    ecsvm_system_api_t api;
+struct ecsvm_engine {
+    void *(*alloc)(ecsvm_engine_t *engine, size_t size);
+    void (*free)(ecsvm_engine_t *engine, void *ptr);
+    void (*log)(ecsvm_engine_t *engine, const char *message);
+    ecsvm_status_t (*register_system)(
+        ecsvm_engine_t *engine,
+        const ecsvm_system_definition_t *definition
+    );
+    ecsvm_system_t *(*get_system)(ecsvm_engine_t *engine, const char *name);
+    ecsvm_system_t *(*current_system)(ecsvm_engine_t *engine);
+    const char *current_system_name;
+    size_t current_system_index;
+
+    ecsvm_entity_t next_entity_id;
+    ecsvm_entity_t *entities;
+    size_t entity_count;
+    size_t entity_capacity;
+
+    ecsvm_component_store_t *components;
+    size_t component_count;
+    size_t component_capacity;
+
+    ecsvm_system_t *systems;
+    size_t system_count;
+    size_t system_capacity;
+    size_t *system_pipeline;
+    size_t system_pipeline_count;
+    int pipeline_dirty;
+
+    ecsvm_function_entry_t *functions;
+    size_t function_count;
+    size_t function_capacity;
+
+    ecsvm_blob_slot_t *blobs;
+    size_t blob_count;
+    size_t blob_capacity;
+
+    ecsvm_component_id_t hierarchy_component;
+    int stop_requested;
+
+    ecsvm_alloc_fn allocator;
+    ecsvm_free_fn deallocator;
+    ecsvm_log_fn logger;
+    void *allocator_userdata;
+    void *logger_userdata;
+    ecsvm_system_t *active_system;
 };
 
 ecsvm_engine_t *ecsvm_engine_create(void);
 void ecsvm_engine_destroy(ecsvm_engine_t *engine);
+
+void *ecsvm_engine_alloc(ecsvm_engine_t *engine, size_t size);
+void ecsvm_engine_free(ecsvm_engine_t *engine, void *ptr);
+void ecsvm_engine_log(ecsvm_engine_t *engine, const char *message);
+ecsvm_system_t *ecsvm_engine_get_system(ecsvm_engine_t *engine, const char *name);
+ecsvm_system_t *ecsvm_engine_current_system(ecsvm_engine_t *engine);
+void *ecsvm_system_get_userdata(ecsvm_system_t *system);
 
 ecsvm_status_t ecsvm_engine_register_builtin_components(ecsvm_engine_t *engine);
 ecsvm_component_id_t ecsvm_engine_hierarchy_component(const ecsvm_engine_t *engine);
@@ -100,8 +157,7 @@ ecsvm_status_t ecsvm_engine_register_component(
 
 ecsvm_status_t ecsvm_engine_register_system(
     ecsvm_engine_t *engine,
-    const ecsvm_system_desc_t *desc,
-    size_t *out_system_index
+    const ecsvm_system_definition_t *definition
 );
 
 ecsvm_status_t ecsvm_engine_tick(ecsvm_engine_t *engine);

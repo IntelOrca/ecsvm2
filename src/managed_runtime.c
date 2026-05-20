@@ -2,15 +2,9 @@
 
 #include "bin_internal.h"
 #include "ecsvm/project.h"
-#include "ecsvm/system_time.h"
+#include "ecsvm/system.h"
 #include "system_hotreload.h"
 #include "utility.h"
-
-#if ECSVM_ENABLE_SDL3
-#include "ecsvm/component.h"
-#include "ecsvm/system_renderer.h"
-#include "ecsvm/system_window.h"
-#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -55,11 +49,6 @@ typedef struct ecsvm_project_runtime {
     char *core_library_path;
     char *ecsbin_path;
     ecsvm_hotreload_system_t hotreload_system;
-    ecsvm_time_system_t time_system;
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *window_system;
-    ecsvm_renderer_system_t *renderer_system;
-#endif
 } ecsvm_project_runtime_t;
 
 enum {
@@ -1439,12 +1428,16 @@ static ecsvm_status_t ecsvm_managed_invoke_function(
     return status;
 }
 
-static ecsvm_status_t ecsvm_managed_system_callback(ecsvm_context_t *ctx)
+static ecsvm_status_t ecsvm_managed_system_callback(ecsvm_engine_t *engine)
 {
     ecsvm_managed_system_binding_t *binding;
+    ecsvm_system_t *system;
     ecsvm_managed_value_t result;
 
-    binding = (ecsvm_managed_system_binding_t *)ctx->api.userdata;
+    system = engine != NULL ? engine->current_system(engine) : NULL;
+    binding = system != NULL
+        ? (ecsvm_managed_system_binding_t *)system->get_userdata(system)
+        : NULL;
     if (binding == NULL || binding->runtime == NULL) {
         return ECSVM_ERROR_ARGUMENT;
     }
@@ -1761,7 +1754,7 @@ static int ecsvm_register_managed_systems(
 
     for (function_index = 0u; function_index < module->function_ref_count; ++function_index) {
         const ecsvm_ecsbin_function_ref_t *function_ref;
-        ecsvm_system_desc_t desc;
+        ecsvm_system_definition_t definition;
         const char **before_names;
         const char **after_names;
         size_t before_count;
@@ -1817,17 +1810,17 @@ static int ecsvm_register_managed_systems(
             return 0;
         }
 
-        memset(&desc, 0, sizeof(desc));
+        memset(&definition, 0, sizeof(definition));
         bindings[binding_index].runtime = runtime;
         bindings[binding_index].function_id = (uint32_t)function_index + 1u;
-        desc.name = function_ref->qualified_name;
-        desc.callback = ecsvm_managed_system_callback;
-        desc.user_data = &bindings[binding_index];
-        desc.before = before_names;
-        desc.before_count = before_count;
-        desc.after = after_names;
-        desc.after_count = after_count;
-        status = ecsvm_engine_register_system(engine, &desc, NULL);
+        definition.name = function_ref->qualified_name;
+        definition.main = ecsvm_managed_system_callback;
+        definition.userdata = &bindings[binding_index];
+        definition.before = before_names;
+        definition.before_count = before_count;
+        definition.after = after_names;
+        definition.after_count = after_count;
+        status = ecsvm_engine_register_system(engine, &definition);
         free(before_names);
         free(after_names);
         if (status != ECSVM_OK) {
@@ -2207,82 +2200,33 @@ static ecsvm_status_t ecsvm_register_new_components(
 #if ECSVM_ENABLE_SDL3
 static int ecsvm_module_requires_renderer_system(const ecsvm_ecsbin_module_t *module)
 {
-    return ecsvm_module_references_system_dependency(module, "core.Renderer");
+    return ecsvm_module_references_system_dependency(module, ECSVM_SYSTEM_RENDERER_NAME);
 }
 
 static int ecsvm_module_requires_window_system(const ecsvm_ecsbin_module_t *module)
 {
     return ecsvm_module_requires_renderer_system(module) ||
-        ecsvm_module_references_system_dependency(module, "core.Window");
-}
-
-static ecsvm_window_system_t *ecsvm_create_default_window_system(void)
-{
-    ecsvm_window_config_t window_config;
-
-    memset(&window_config, 0, sizeof(window_config));
-    window_config.title = "ecsvm";
-    window_config.width = 960;
-    window_config.height = 540;
-    return ecsvm_window_system_create(&window_config);
-}
-
-static ecsvm_renderer_system_t *ecsvm_create_default_renderer_system(
-    ecsvm_engine_t *engine,
-    ecsvm_window_system_t *window_system
-)
-{
-    ecsvm_renderer_config_t renderer_config;
-
-    if (engine == NULL || window_system == NULL) {
-        return NULL;
-    }
-
-    memset(&renderer_config, 0, sizeof(renderer_config));
-    renderer_config.components.hierarchy = ecsvm_engine_hierarchy_component(engine);
-    renderer_config.components.transform = ecsvm_engine_find_component(engine, "core.Transform");
-    renderer_config.components.time = ecsvm_engine_find_component(engine, "core.Time");
-    renderer_config.components.graphics_shape = ecsvm_engine_find_component(engine, "core.graphics.GraphicsShape");
-    renderer_config.clear_color.x = 0.05f;
-    renderer_config.clear_color.y = 0.05f;
-    renderer_config.clear_color.z = 0.08f;
-    renderer_config.clear_color.w = 1.0f;
-    if (renderer_config.components.transform == ECSVM_INVALID_COMPONENT ||
-        renderer_config.components.graphics_shape == ECSVM_INVALID_COMPONENT) {
-        return NULL;
-    }
-
-    return ecsvm_renderer_system_create(window_system, &renderer_config);
+        ecsvm_module_references_system_dependency(module, ECSVM_SYSTEM_WINDOW_NAME);
 }
 #endif
 
 static int ecsvm_register_native_systems(
     ecsvm_engine_t *engine,
     const ecsvm_ecsbin_module_t *module,
-    ecsvm_time_system_t *time_system,
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *window_system,
-    ecsvm_renderer_system_t *renderer_system,
-#endif
     char *error_message,
     size_t error_message_capacity
 )
 {
-    ecsvm_component_id_t time_component;
     ecsvm_status_t status;
 
-    if (engine == NULL || module == NULL || time_system == NULL) {
+    if (engine == NULL || module == NULL) {
         ecsvm_managed_set_error(error_message, error_message_capacity, "invalid native runtime state");
         return 0;
     }
 
-    time_component = ecsvm_engine_find_component(engine, "core.Time");
-    if (time_component != ECSVM_INVALID_COMPONENT) {
-        if (time_system->time_component != time_component) {
-            ecsvm_time_system_init(time_system, time_component);
-        }
-
-        status = ecsvm_time_system_register(engine, time_system);
+    if (ecsvm_engine_find_component(engine, "core.Time") != ECSVM_INVALID_COMPONENT &&
+        engine->get_system(engine, ECSVM_SYSTEM_TIME_NAME) == NULL) {
+        status = ecsvm_system_time_register(engine);
         if (status != ECSVM_OK) {
             (void)snprintf(
                 error_message,
@@ -2295,13 +2239,9 @@ static int ecsvm_register_native_systems(
     }
 
 #if ECSVM_ENABLE_SDL3
-    if (ecsvm_module_requires_window_system(module)) {
-        if (window_system == NULL) {
-            ecsvm_managed_set_error(error_message, error_message_capacity, "failed to create SDL window system");
-            return 0;
-        }
-
-        status = ecsvm_window_system_register(engine, window_system);
+    if (ecsvm_module_requires_window_system(module) &&
+        engine->get_system(engine, ECSVM_SYSTEM_WINDOW_NAME) == NULL) {
+        status = ecsvm_system_window_register(engine);
         if (status != ECSVM_OK) {
             (void)snprintf(
                 error_message,
@@ -2313,13 +2253,9 @@ static int ecsvm_register_native_systems(
         }
     }
 
-    if (ecsvm_module_requires_renderer_system(module)) {
-        if (renderer_system == NULL) {
-            ecsvm_managed_set_error(error_message, error_message_capacity, "failed to create SDL renderer system");
-            return 0;
-        }
-
-        status = ecsvm_renderer_system_register(engine, renderer_system);
+    if (ecsvm_module_requires_renderer_system(module) &&
+        engine->get_system(engine, ECSVM_SYSTEM_RENDERER_NAME) == NULL) {
+        status = ecsvm_system_renderer_register(engine);
         if (status != ECSVM_OK) {
             (void)snprintf(
                 error_message,
@@ -2336,6 +2272,28 @@ static int ecsvm_register_native_systems(
 #endif
 
     return 1;
+}
+
+static void ecsvm_unregister_unused_native_systems(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module
+)
+{
+    if (engine == NULL) {
+        return;
+    }
+
+#if ECSVM_ENABLE_SDL3
+    if (module == NULL || !ecsvm_module_requires_renderer_system(module)) {
+        ecsvm_unregister_system_if_present(engine, ECSVM_SYSTEM_RENDERER_NAME);
+    }
+
+    if (module == NULL || !ecsvm_module_requires_window_system(module)) {
+        ecsvm_unregister_system_if_present(engine, ECSVM_SYSTEM_WINDOW_NAME);
+    }
+#else
+    (void)module;
+#endif
 }
 
 static ecsvm_status_t ecsvm_prepare_engine_for_module(
@@ -2362,11 +2320,6 @@ static int ecsvm_register_module_runtime(
     ecsvm_engine_t *engine,
     ecsvm_managed_runtime_t *runtime,
     const ecsvm_ecsbin_module_t *module,
-    ecsvm_time_system_t *time_system,
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *window_system,
-    ecsvm_renderer_system_t *renderer_system,
-#endif
     ecsvm_managed_system_binding_t *bindings,
     size_t binding_count,
     char *error_message,
@@ -2377,11 +2330,6 @@ static int ecsvm_register_module_runtime(
     return ecsvm_register_native_systems(
                engine,
                module,
-               time_system,
-#if ECSVM_ENABLE_SDL3
-               window_system,
-               renderer_system,
-#endif
                error_message,
                error_message_capacity
            ) &&
@@ -2400,11 +2348,6 @@ static int ecsvm_allocate_and_register_module_runtime(
     ecsvm_engine_t *engine,
     ecsvm_managed_runtime_t *runtime,
     const ecsvm_ecsbin_module_t *module,
-    ecsvm_time_system_t *time_system,
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *window_system,
-    ecsvm_renderer_system_t *renderer_system,
-#endif
     ecsvm_managed_system_binding_t **bindings,
     size_t *binding_count,
     char *error_message,
@@ -2425,11 +2368,6 @@ static int ecsvm_allocate_and_register_module_runtime(
             engine,
             runtime,
             module,
-            time_system,
-#if ECSVM_ENABLE_SDL3
-            window_system,
-            renderer_system,
-#endif
             *bindings,
             *binding_count,
             error_message,
@@ -2443,39 +2381,6 @@ static int ecsvm_allocate_and_register_module_runtime(
 
     return 1;
 }
-
-#if ECSVM_ENABLE_SDL3
-static int ecsvm_create_optional_sdl_systems(
-    ecsvm_engine_t *engine,
-    const ecsvm_ecsbin_module_t *module,
-    ecsvm_window_system_t **window_system,
-    ecsvm_renderer_system_t **renderer_system,
-    const char *log_prefix
-)
-{
-    if (ecsvm_module_requires_window_system(module)) {
-        *window_system = ecsvm_create_default_window_system();
-        if (*window_system == NULL) {
-            ecsvm_managed_log_prefixed(log_prefix, "failed to create SDL window system");
-            return 0;
-        }
-    }
-
-    if (ecsvm_module_requires_renderer_system(module)) {
-        *renderer_system = ecsvm_create_default_renderer_system(engine, *window_system);
-        if (*renderer_system == NULL) {
-            ecsvm_managed_log_prefixed(log_prefix, "failed to create SDL renderer system");
-            if (*window_system != NULL) {
-                ecsvm_window_system_destroy(*window_system);
-                *window_system = NULL;
-            }
-            return 0;
-        }
-    }
-
-    return 1;
-}
-#endif
 
 static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runtime)
 {
@@ -2502,11 +2407,6 @@ static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runti
             runtime->engine,
             &runtime->managed_runtime,
             runtime->module,
-            &runtime->time_system,
-#if ECSVM_ENABLE_SDL3
-            runtime->window_system,
-            runtime->renderer_system,
-#endif
             runtime->bindings,
             runtime->binding_count,
             error_message,
@@ -2516,6 +2416,7 @@ static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runti
         return 0;
     }
 
+    ecsvm_unregister_unused_native_systems(runtime->engine, runtime->module);
     return 1;
 }
 
@@ -2527,14 +2428,6 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     ecsvm_managed_system_binding_t *next_bindings;
     size_t next_binding_count;
     ecsvm_status_t status;
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *next_window_system;
-    ecsvm_renderer_system_t *next_renderer_system;
-    ecsvm_window_system_t *created_window_system;
-    ecsvm_renderer_system_t *created_renderer_system;
-    int keep_window_system;
-    int keep_renderer_system;
-#endif
 
     if (runtime == NULL || runtime->engine == NULL || runtime->module == NULL) {
         return -1;
@@ -2586,38 +2479,6 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         return 0;
     }
 
-#if ECSVM_ENABLE_SDL3
-    next_window_system = runtime->window_system;
-    next_renderer_system = runtime->renderer_system;
-    created_window_system = NULL;
-    created_renderer_system = NULL;
-    keep_window_system = ecsvm_module_requires_window_system(next_module);
-    keep_renderer_system = ecsvm_module_requires_renderer_system(next_module);
-
-    if (keep_window_system && next_window_system == NULL) {
-        created_window_system = ecsvm_create_default_window_system();
-        if (created_window_system == NULL) {
-            ecsvm_managed_log_line("hotreload: failed to create SDL window system");
-            free(next_bindings);
-            ecsvm_managed_unload_module(next_module);
-            return 0;
-        }
-        next_window_system = created_window_system;
-    }
-
-    if (keep_renderer_system && next_renderer_system == NULL) {
-        created_renderer_system = ecsvm_create_default_renderer_system(runtime->engine, next_window_system);
-        if (created_renderer_system == NULL) {
-            ecsvm_managed_log_line("hotreload: failed to create SDL renderer system");
-            ecsvm_window_system_destroy(created_window_system);
-            free(next_bindings);
-            ecsvm_managed_unload_module(next_module);
-            return 0;
-        }
-        next_renderer_system = created_renderer_system;
-    }
-#endif
-
     status = ecsvm_register_new_components(
         runtime->engine,
         next_module,
@@ -2626,10 +2487,6 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     );
     if (status != ECSVM_OK) {
         ecsvm_managed_log_prefixed("hotreload", error_message);
-#if ECSVM_ENABLE_SDL3
-        ecsvm_renderer_system_destroy(created_renderer_system);
-        ecsvm_window_system_destroy(created_window_system);
-#endif
         free(next_bindings);
         ecsvm_managed_unload_module(next_module);
         return 0;
@@ -2649,10 +2506,6 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
             ecsvm_managed_log_line("hotreload: previous runtime state could not be restored");
             status = ECSVM_ERROR_CALLBACK;
         }
-#if ECSVM_ENABLE_SDL3
-        ecsvm_renderer_system_destroy(created_renderer_system);
-        ecsvm_window_system_destroy(created_window_system);
-#endif
         free(next_bindings);
         ecsvm_managed_unload_module(next_module);
         return status == ECSVM_ERROR_CALLBACK ? -1 : 0;
@@ -2662,11 +2515,6 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
             runtime->engine,
             &runtime->managed_runtime,
             next_module,
-            &runtime->time_system,
-#if ECSVM_ENABLE_SDL3
-            next_window_system,
-            next_renderer_system,
-#endif
             next_bindings,
             next_binding_count,
             error_message,
@@ -2676,41 +2524,15 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         ecsvm_unregister_project_runtime_systems(runtime->engine, next_module);
         if (!ecsvm_restore_previous_project_runtime(runtime)) {
             ecsvm_managed_log_line("hotreload: previous runtime state could not be restored");
-#if ECSVM_ENABLE_SDL3
-            ecsvm_renderer_system_destroy(created_renderer_system);
-            ecsvm_window_system_destroy(created_window_system);
-#endif
             free(next_bindings);
             ecsvm_managed_unload_module(next_module);
             return -1;
         }
 
-#if ECSVM_ENABLE_SDL3
-        ecsvm_renderer_system_destroy(created_renderer_system);
-        ecsvm_window_system_destroy(created_window_system);
-#endif
         free(next_bindings);
         ecsvm_managed_unload_module(next_module);
         return 0;
     }
-
-#if ECSVM_ENABLE_SDL3
-    if (!keep_renderer_system && runtime->renderer_system != NULL) {
-        ecsvm_renderer_system_destroy(runtime->renderer_system);
-        runtime->renderer_system = NULL;
-    } else if (created_renderer_system != NULL) {
-        runtime->renderer_system = created_renderer_system;
-        created_renderer_system = NULL;
-    }
-
-    if (!keep_window_system && runtime->window_system != NULL) {
-        ecsvm_window_system_destroy(runtime->window_system);
-        runtime->window_system = NULL;
-    } else if (created_window_system != NULL) {
-        runtime->window_system = created_window_system;
-        created_window_system = NULL;
-    }
-#endif
 
     ecsvm_managed_unload_module(runtime->module);
     free(runtime->bindings);
@@ -2718,6 +2540,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     runtime->bindings = next_bindings;
     runtime->binding_count = next_binding_count;
     runtime->managed_runtime.module = runtime->module;
+    ecsvm_unregister_unused_native_systems(runtime->engine, runtime->module);
     ecsvm_managed_log_line("hotreload: reloaded project systems");
     return 1;
 }
@@ -2731,10 +2554,6 @@ static void ecsvm_project_runtime_free(ecsvm_project_runtime_t *runtime)
     ecsvm_hotreload_system_free(&runtime->hotreload_system);
     free(runtime->bindings);
     ecsvm_managed_unload_module(runtime->module);
-#if ECSVM_ENABLE_SDL3
-    ecsvm_renderer_system_destroy(runtime->renderer_system);
-    ecsvm_window_system_destroy(runtime->window_system);
-#endif
     ecsvm_engine_destroy(runtime->engine);
     free(runtime->project_path);
     free(runtime->core_library_path);
@@ -2747,23 +2566,13 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     ecsvm_engine_t *engine;
     ecsvm_managed_runtime_t runtime;
     ecsvm_managed_system_binding_t *bindings;
-    ecsvm_time_system_t time_system;
-#if ECSVM_ENABLE_SDL3
-    ecsvm_window_system_t *window_system;
-    ecsvm_renderer_system_t *renderer_system;
-#endif
     size_t binding_count;
     ecsvm_status_t status;
     char error_message[256];
     int exit_code;
 
     memset(&runtime, 0, sizeof(runtime));
-    memset(&time_system, 0, sizeof(time_system));
     bindings = NULL;
-#if ECSVM_ENABLE_SDL3
-    window_system = NULL;
-    renderer_system = NULL;
-#endif
     binding_count = 0u;
     exit_code = 1;
 
@@ -2786,27 +2595,10 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
         return 1;
     }
 
-#if ECSVM_ENABLE_SDL3
-    if (!ecsvm_create_optional_sdl_systems(
-            engine,
-            module,
-            &window_system,
-            &renderer_system,
-            "run"
-        )) {
-        goto cleanup;
-    }
-#endif
-
     if (!ecsvm_allocate_and_register_module_runtime(
             engine,
             &runtime,
             module,
-            &time_system,
-#if ECSVM_ENABLE_SDL3
-            window_system,
-            renderer_system,
-#endif
             &bindings,
             &binding_count,
             error_message,
@@ -2826,10 +2618,6 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
 
 cleanup:
     free(bindings);
-#if ECSVM_ENABLE_SDL3
-    ecsvm_renderer_system_destroy(renderer_system);
-    ecsvm_window_system_destroy(window_system);
-#endif
     ecsvm_engine_destroy(engine);
     return exit_code;
 }
@@ -2922,28 +2710,10 @@ int ecsvm_run_project(const char *project_path, const char *core_library_path, c
         return 1;
     }
 
-#if ECSVM_ENABLE_SDL3
-    if (!ecsvm_create_optional_sdl_systems(
-            runtime.engine,
-            runtime.module,
-            &runtime.window_system,
-            &runtime.renderer_system,
-            "run"
-        )) {
-        ecsvm_project_runtime_free(&runtime);
-        return 1;
-    }
-#endif
-
     if (!ecsvm_allocate_and_register_module_runtime(
             runtime.engine,
             &runtime.managed_runtime,
             runtime.module,
-            &runtime.time_system,
-#if ECSVM_ENABLE_SDL3
-            runtime.window_system,
-            runtime.renderer_system,
-#endif
             &runtime.bindings,
             &runtime.binding_count,
             error_message,

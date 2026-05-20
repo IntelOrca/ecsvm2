@@ -177,6 +177,102 @@ static int load_module_for_cli(
     return 1;
 }
 
+static int parse_optional_core_lib_args(
+    int argc,
+    char **argv,
+    int argi,
+    const char **out_core_library_path,
+    const char **out_target
+)
+{
+    if (argc - argi == 2) {
+        *out_core_library_path = NULL;
+        *out_target = argv[argi + 1];
+        return 1;
+    }
+
+    if (argc - argi == 4 && strcmp(argv[argi + 1], "--core-lib") == 0) {
+        *out_core_library_path = argv[argi + 2];
+        *out_target = argv[argi + 3];
+        return 1;
+    }
+
+    return 0;
+}
+
+static int build_project_for_cli(
+    const char *project_path,
+    const char *core_library_path,
+    char *output_path,
+    size_t output_path_capacity,
+    char *error_message,
+    size_t error_message_capacity,
+    const ecsvm_logger_t *logger,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    ecsvm_status_t status;
+
+    status = ecsvm_project_build_with_core_ex(
+        project_path,
+        core_library_path,
+        output_path,
+        output_path_capacity,
+        error_message,
+        error_message_capacity,
+        logger,
+        diagnostic
+    );
+    if (status != ECSVM_OK) {
+        log_failure(logger, "build failed", status, diagnostic, error_message);
+        return 0;
+    }
+
+    return 1;
+}
+
+typedef ecsvm_status_t (*ecsvm_cli_module_text_fn)(
+    const ecsvm_ecsbin_module_t *module,
+    char **out_text,
+    char *error_message,
+    size_t error_message_capacity,
+    ecsvm_diagnostic_t *diagnostic
+);
+
+static int run_module_text_command(
+    const char *path,
+    const char *failure_prefix,
+    ecsvm_cli_module_text_fn command,
+    char *error_message,
+    size_t error_message_capacity,
+    const ecsvm_logger_t *logger,
+    ecsvm_diagnostic_t *diagnostic
+)
+{
+    ecsvm_ecsbin_module_t module;
+    char *text;
+    ecsvm_status_t status;
+
+    memset(&module, 0, sizeof(module));
+    if (!load_module_for_cli(path, &module, logger, diagnostic)) {
+        return 1;
+    }
+
+    text = NULL;
+    status = command(&module, &text, error_message, error_message_capacity, diagnostic);
+    if (status != ECSVM_OK) {
+        ecsvm_ecsbin_unload(&module);
+        free(text);
+        log_failure(logger, failure_prefix, status, diagnostic, error_message);
+        return 1;
+    }
+
+    fputs(text, stdout);
+    free(text);
+    ecsvm_ecsbin_unload(&module);
+    return 0;
+}
+
 static int run_self_test(void)
 {
     ecsvm_component_desc_t position_desc;
@@ -361,36 +457,24 @@ int main(int argc, char **argv)
     }
 
     if ((argc - argi == 2 || argc - argi == 4) && strcmp(argv[argi], "build") == 0) {
-        ecsvm_status_t status;
         const char *core_library_path;
         const char *project_path;
 
-        core_library_path = NULL;
-        project_path = argv[argi + 1];
-        if (argc - argi == 4 &&
-            strcmp(argv[argi + 1], "--core-lib") == 0) {
-            core_library_path = argv[argi + 2];
-            project_path = argv[argi + 3];
-        }
-
-        if (argc - argi != 2 &&
-            !(argc - argi == 4 && strcmp(argv[argi + 1], "--core-lib") == 0)) {
+        if (!parse_optional_core_lib_args(argc, argv, argi, &core_library_path, &project_path)) {
             print_usage(argv[0]);
             return 1;
         }
 
-        status = ecsvm_project_build_with_core_ex(
-            project_path,
-            core_library_path,
-            output_path,
-            sizeof(output_path),
-            error_message,
-            sizeof(error_message),
-            &logger,
-            &diagnostic
-        );
-        if (status != ECSVM_OK) {
-            log_failure(&logger, "build failed", status, &diagnostic, error_message);
+        if (!build_project_for_cli(
+                project_path,
+                core_library_path,
+                output_path,
+                sizeof(output_path),
+                error_message,
+                sizeof(error_message),
+                &logger,
+                &diagnostic
+            )) {
             return 1;
         }
 
@@ -402,34 +486,22 @@ int main(int argc, char **argv)
         const char *core_library_path;
         const char *run_target;
 
-        core_library_path = NULL;
-        run_target = argv[argi + 1];
-        if (argc - argi == 4 &&
-            strcmp(argv[argi + 1], "--core-lib") == 0) {
-            core_library_path = argv[argi + 2];
-            run_target = argv[argi + 3];
-        }
-        if (argc - argi != 2 &&
-            !(argc - argi == 4 && strcmp(argv[argi + 1], "--core-lib") == 0)) {
+        if (!parse_optional_core_lib_args(argc, argv, argi, &core_library_path, &run_target)) {
             print_usage(argv[0]);
             return 1;
         }
 
         if (ecsvm_path_is_directory(run_target)) {
-            ecsvm_status_t status;
-
-            status = ecsvm_project_build_with_core_ex(
-                run_target,
-                core_library_path,
-                output_path,
-                sizeof(output_path),
-                error_message,
-                sizeof(error_message),
-                &logger,
-                &diagnostic
-            );
-            if (status != ECSVM_OK) {
-                log_failure(&logger, "build failed", status, &diagnostic, error_message);
+            if (!build_project_for_cli(
+                    run_target,
+                    core_library_path,
+                    output_path,
+                    sizeof(output_path),
+                    error_message,
+                    sizeof(error_message),
+                    &logger,
+                    &diagnostic
+                )) {
                 return 1;
             }
             return ecsvm_run_project(run_target, core_library_path, output_path);
@@ -442,53 +514,27 @@ int main(int argc, char **argv)
     }
 
     if (argc - argi == 2 && strcmp(argv[argi], "decompile") == 0) {
-        ecsvm_ecsbin_module_t module;
-        char *source;
-        ecsvm_status_t status;
-
-        memset(&module, 0, sizeof(module));
-        if (!load_module_for_cli(argv[argi + 1], &module, &logger, &diagnostic)) {
-            return 1;
-        }
-
-        source = NULL;
-        status = ecsvm_ecsbin_decompile_module(&module, &source, error_message, sizeof(error_message), &diagnostic);
-        if (status != ECSVM_OK) {
-            ecsvm_ecsbin_unload(&module);
-            free(source);
-            log_failure(&logger, "decompile failed", status, &diagnostic, error_message);
-            return 1;
-        }
-
-        fputs(source, stdout);
-        free(source);
-        ecsvm_ecsbin_unload(&module);
-        return 0;
+        return run_module_text_command(
+            argv[argi + 1],
+            "decompile failed",
+            ecsvm_ecsbin_decompile_module,
+            error_message,
+            sizeof(error_message),
+            &logger,
+            &diagnostic
+        );
     }
 
     if (argc - argi == 2 && strcmp(argv[argi], "inspect") == 0) {
-        ecsvm_ecsbin_module_t module;
-        char *text;
-        ecsvm_status_t status;
-
-        memset(&module, 0, sizeof(module));
-        if (!load_module_for_cli(argv[argi + 1], &module, &logger, &diagnostic)) {
-            return 1;
-        }
-
-        text = NULL;
-        status = ecsvm_ecsbin_inspect_module(&module, &text, error_message, sizeof(error_message), &diagnostic);
-        if (status != ECSVM_OK) {
-            ecsvm_ecsbin_unload(&module);
-            free(text);
-            log_failure(&logger, "inspect failed", status, &diagnostic, error_message);
-            return 1;
-        }
-
-        fputs(text, stdout);
-        free(text);
-        ecsvm_ecsbin_unload(&module);
-        return 0;
+        return run_module_text_command(
+            argv[argi + 1],
+            "inspect failed",
+            ecsvm_ecsbin_inspect_module,
+            error_message,
+            sizeof(error_message),
+            &logger,
+            &diagnostic
+        );
     }
 
     if (argc - argi == 2 && strcmp(argv[argi], "parse") == 0) {

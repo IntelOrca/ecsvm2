@@ -1,218 +1,36 @@
 #ifndef ECSVM_BIN_INTERNAL_H
 #define ECSVM_BIN_INTERNAL_H
 
+#include "ecs_syntax_defs.h"
+#include "ecsbin_layout.h"
 #include "ecsvm/ecsbin.h"
 #include "ecsvm/diagnostic.h"
 #include "text_buffer.h"
+#include "utility.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-typedef __int64 ecsvm_file_offset_t;
-#define ECSVM_FTELL _ftelli64
-#define ECSVM_FSEEK _fseeki64
-#else
-typedef long ecsvm_file_offset_t;
-#define ECSVM_FTELL ftell
-#define ECSVM_FSEEK fseek
-#endif
-
-#ifdef _MSC_VER
-#define ECSVM_ALIGNOF(type) __alignof(type)
-#else
-#define ECSVM_ALIGNOF(type) offsetof(struct { char pad; type value; }, value)
-#endif
-
-typedef struct ecsvm_ecsbin_header_prefix {
-    char magic[5];
-    unsigned char version[3];
-} ecsvm_ecsbin_header_prefix_t;
-
-typedef struct ecsvm_ecsbin_header_v1 {
-    char magic[5];
-    unsigned char version[3];
-    uint64_t type_reference_offset;
-    uint64_t field_reference_offset;
-    uint64_t struct_definition_offset;
-    uint64_t field_definition_offset;
-    uint64_t attribute_offset;
-    uint64_t blob_offset;
-    uint32_t type_reference_count;
-    uint32_t field_reference_count;
-    uint32_t struct_definition_count;
-    uint32_t field_definition_count;
-    uint32_t attribute_count;
-    uint32_t blob_count;
-} ecsvm_ecsbin_header_v1_t;
-
-typedef struct ecsvm_ecsbin_header {
-    char magic[5];
-    unsigned char version[3];
-    uint64_t type_reference_offset;
-    uint64_t field_reference_offset;
-    uint64_t struct_definition_offset;
-    uint64_t field_definition_offset;
-    uint64_t function_reference_offset;
-    uint64_t parameter_offset;
-    uint64_t attribute_offset;
-    uint64_t blob_offset;
-    uint32_t type_reference_count;
-    uint32_t field_reference_count;
-    uint32_t struct_definition_count;
-    uint32_t field_definition_count;
-    uint32_t function_reference_count;
-    uint32_t parameter_count;
-    uint32_t attribute_count;
-    uint32_t blob_count;
-} ecsvm_ecsbin_header_t;
-
-typedef struct ecsvm_ecsbin_type_ref_disk {
-    uint32_t namespace_blob_id;
-    uint32_t name_blob_id;
-} ecsvm_ecsbin_type_ref_disk_t;
-
-typedef struct ecsvm_ecsbin_field_ref_disk {
-    uint32_t name_blob_id;
-    uint32_t type_id;
-} ecsvm_ecsbin_field_ref_disk_t;
-
-typedef struct ecsvm_ecsbin_struct_def_disk {
-    uint32_t type_id;
-    uint32_t flags;
-    uint32_t field_start;
-    uint32_t field_count;
-    uint32_t attribute_start;
-    uint32_t attribute_count;
-} ecsvm_ecsbin_struct_def_disk_t;
-
-typedef struct ecsvm_ecsbin_field_def_disk {
-    uint32_t field_id;
-    uint32_t attribute_start;
-    uint32_t attribute_count;
-} ecsvm_ecsbin_field_def_disk_t;
-
-typedef struct ecsvm_ecsbin_function_ref_disk {
-    uint32_t namespace_blob_id;
-    uint32_t name_blob_id;
-    uint32_t parameter_start;
-    uint32_t parameter_count;
-    uint32_t attribute_start;
-    uint32_t attribute_count;
-    uint32_t body_blob_id;
-} ecsvm_ecsbin_function_ref_disk_t;
-
-typedef struct ecsvm_ecsbin_parameter_disk {
-    uint32_t name_blob_id;
-    uint32_t type_id;
-    uint32_t attribute_start;
-    uint32_t attribute_count;
-    uint32_t default_value_blob_id;
-} ecsvm_ecsbin_parameter_disk_t;
-
-typedef struct ecsvm_ecsbin_attribute_disk {
-    uint32_t type_id;
-    uint32_t data_blob_id;
-} ecsvm_ecsbin_attribute_disk_t;
-
-typedef struct ecsvm_ecsbin_blob_disk {
-    uint64_t offset;
-    uint64_t length;
-} ecsvm_ecsbin_blob_disk_t;
-
 typedef enum ecsvm_ecsbin_token_kind {
-    ECSVM_ECSBIN_TOKEN_EOF = 0,
-    ECSVM_ECSBIN_TOKEN_IDENTIFIER,
-    ECSVM_ECSBIN_TOKEN_NUMBER,
-    ECSVM_ECSBIN_TOKEN_STRING,
-    ECSVM_ECSBIN_TOKEN_LBRACE,
-    ECSVM_ECSBIN_TOKEN_RBRACE,
-    ECSVM_ECSBIN_TOKEN_LBRACKET,
-    ECSVM_ECSBIN_TOKEN_RBRACKET,
-    ECSVM_ECSBIN_TOKEN_LPAREN,
-    ECSVM_ECSBIN_TOKEN_RPAREN,
-    ECSVM_ECSBIN_TOKEN_COLON,
-    ECSVM_ECSBIN_TOKEN_SEMICOLON,
-    ECSVM_ECSBIN_TOKEN_DOT,
-    ECSVM_ECSBIN_TOKEN_COMMA,
-    ECSVM_ECSBIN_TOKEN_EQUAL,
-    ECSVM_ECSBIN_TOKEN_BANG,
-    ECSVM_ECSBIN_TOKEN_PLUS,
-    ECSVM_ECSBIN_TOKEN_MINUS,
-    ECSVM_ECSBIN_TOKEN_STAR,
-    ECSVM_ECSBIN_TOKEN_SLASH,
-    ECSVM_ECSBIN_TOKEN_PERCENT,
-    ECSVM_ECSBIN_TOKEN_LT,
-    ECSVM_ECSBIN_TOKEN_GT,
-    ECSVM_ECSBIN_TOKEN_AMPERSAND,
-    ECSVM_ECSBIN_TOKEN_PIPE,
-    ECSVM_ECSBIN_TOKEN_CARET,
-    ECSVM_ECSBIN_TOKEN_TILDE,
-    ECSVM_ECSBIN_TOKEN_KEY_IMPORT,
-    ECSVM_ECSBIN_TOKEN_KEY_NAMESPACE,
-    ECSVM_ECSBIN_TOKEN_KEY_STRUCT,
-    ECSVM_ECSBIN_TOKEN_KEY_COMPONENT,
-    ECSVM_ECSBIN_TOKEN_KEY_ATTRIBUTE,
-    ECSVM_ECSBIN_TOKEN_KEY_SYSTEM,
-    ECSVM_ECSBIN_TOKEN_KEY_CONST,
-    ECSVM_ECSBIN_TOKEN_KEY_FN,
-    ECSVM_ECSBIN_TOKEN_KEY_IF,
-    ECSVM_ECSBIN_TOKEN_KEY_FOR,
-    ECSVM_ECSBIN_TOKEN_KEY_IN,
-    ECSVM_ECSBIN_TOKEN_KEY_ELSE,
-    ECSVM_ECSBIN_TOKEN_KEY_LET,
-    ECSVM_ECSBIN_TOKEN_KEY_RETURN,
-    ECSVM_ECSBIN_TOKEN_KEY_TRUE,
-    ECSVM_ECSBIN_TOKEN_KEY_FALSE,
-    ECSVM_ECSBIN_TOKEN_KEY_NULL
+#define ECSVM_BIN_TOKEN_ENUM(name, assign, text) ECSVM_ECSBIN_TOKEN_##name assign,
+    ECSVM_TOKEN_KIND_ITEMS(ECSVM_BIN_TOKEN_ENUM)
+#undef ECSVM_BIN_TOKEN_ENUM
 } ecsvm_ecsbin_token_kind_t;
 
 typedef enum ecsvm_ecsbin_ast_node_kind {
-    ECSVM_ECSBIN_AST_NODE_ROOT = 1,
-    ECSVM_ECSBIN_AST_NODE_BLOCK,
-    ECSVM_ECSBIN_AST_NODE_GROUP_PAREN = 3,
-    ECSVM_ECSBIN_AST_NODE_GROUP_BRACKET = 4,
-    ECSVM_ECSBIN_AST_NODE_TOKEN = 5,
-    ECSVM_ECSBIN_AST_NODE_DECLARATION,
-    ECSVM_ECSBIN_AST_NODE_RETURN_STATEMENT,
-    ECSVM_ECSBIN_AST_NODE_IF_STATEMENT,
-    ECSVM_ECSBIN_AST_NODE_FOR_IN_STATEMENT,
-    ECSVM_ECSBIN_AST_NODE_ELSE_CLAUSE,
-    ECSVM_ECSBIN_AST_NODE_EXPRESSION_STATEMENT,
-    ECSVM_ECSBIN_AST_NODE_ASSIGNMENT_EXPRESSION,
-    ECSVM_ECSBIN_AST_NODE_BINARY_EXPRESSION,
-    ECSVM_ECSBIN_AST_NODE_UNARY_EXPRESSION,
-    ECSVM_ECSBIN_AST_NODE_CALL_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_ARGUMENT_LIST,
-     ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_GROUPING_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_LITERAL_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_IDENTIFIER,
-     ECSVM_ECSBIN_AST_NODE_TYPE_EXPRESSION,
-     ECSVM_ECSBIN_AST_NODE_OBJECT_LITERAL,
-     ECSVM_ECSBIN_AST_NODE_OBJECT_FIELD
- } ecsvm_ecsbin_ast_node_kind_t;
+#define ECSVM_BIN_AST_NODE_ENUM(name, assign) ECSVM_ECSBIN_AST_NODE_##name assign,
+    ECSVM_AST_NODE_KIND_ITEMS(ECSVM_BIN_AST_NODE_ENUM)
+#undef ECSVM_BIN_AST_NODE_ENUM
+} ecsvm_ecsbin_ast_node_kind_t;
 
 typedef enum ecsvm_ecsbin_ast_value_kind {
-    ECSVM_ECSBIN_AST_VALUE_NONE = 0,
-    ECSVM_ECSBIN_AST_VALUE_BLOB_ID,
-    ECSVM_ECSBIN_AST_VALUE_TYPE_REF_ID,
-    ECSVM_ECSBIN_AST_VALUE_FIELD_REF_ID,
-    ECSVM_ECSBIN_AST_VALUE_FUNCTION_REF_ID,
-    ECSVM_ECSBIN_AST_VALUE_PARAMETER_ID
+#define ECSVM_BIN_AST_VALUE_ENUM(name, assign) ECSVM_ECSBIN_AST_VALUE_##name assign,
+    ECSVM_AST_VALUE_KIND_ITEMS(ECSVM_BIN_AST_VALUE_ENUM)
+#undef ECSVM_BIN_AST_VALUE_ENUM
 } ecsvm_ecsbin_ast_value_kind_t;
 
-typedef struct ecsvm_ecsbin_ast_node {
-    uint32_t kind;
-    uint32_t first_child;
-    uint32_t last_child;
-    uint32_t next_sibling;
-    uint32_t token_kind;
-    uint32_t value_kind;
-    uint32_t value;
-} ecsvm_ecsbin_ast_node_t;
+typedef ecsvm_shared_ast_node_t ecsvm_ecsbin_ast_node_t;
 
 typedef struct ecsvm_ecsbin_ast_blob {
     const ecsvm_ecsbin_ast_node_t *nodes;

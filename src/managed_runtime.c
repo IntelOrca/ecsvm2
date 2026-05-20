@@ -4,6 +4,7 @@
 #include "ecsvm/project.h"
 #include "ecsvm/system_time.h"
 #include "system_hotreload.h"
+#include "utility.h"
 
 #if ECSVM_ENABLE_SDL3
 #include "ecsvm/component.h"
@@ -66,25 +67,6 @@ enum {
     ECSVM_MANAGED_CALL_ARGUMENT_LIMIT = 16,
     ECSVM_PROJECT_OUTPUT_PATH_CAPACITY = 4096
 };
-
-static char *ecsvm_managed_copy_string(const char *text)
-{
-    char *copy;
-    size_t length;
-
-    if (text == NULL) {
-        return NULL;
-    }
-
-    length = strlen(text);
-    copy = (char *)malloc(length + 1u);
-    if (copy == NULL) {
-        return NULL;
-    }
-
-    memcpy(copy, text, length + 1u);
-    return copy;
-}
 
 static const ecsvm_ecsbin_blob_t *ecsvm_managed_blob(
     const ecsvm_ecsbin_module_t *module,
@@ -1668,6 +1650,34 @@ static void ecsvm_managed_set_error(char *error_message, size_t error_message_ca
     (void)snprintf(error_message, error_message_capacity, "%s", message);
 }
 
+static void ecsvm_managed_log_line(const char *message)
+{
+    if (message != NULL && message[0] != '\0') {
+        fprintf(stderr, "%s\n", message);
+    }
+}
+
+static void ecsvm_managed_log_prefixed(const char *prefix, const char *message)
+{
+    fprintf(stderr, "%s: %s\n", prefix, message != NULL ? message : "");
+}
+
+static void ecsvm_managed_log_status(
+    const char *prefix,
+    ecsvm_status_t status,
+    const char *error_message
+)
+{
+    fprintf(
+        stderr,
+        "%s: %s\n",
+        prefix,
+        error_message != NULL && error_message[0] != '\0'
+            ? error_message
+            : ecsvm_status_string(status)
+    );
+}
+
 static void ecsvm_managed_unload_module(ecsvm_ecsbin_module_t *module)
 {
     if (module == NULL) {
@@ -2328,6 +2338,145 @@ static int ecsvm_register_native_systems(
     return 1;
 }
 
+static ecsvm_status_t ecsvm_prepare_engine_for_module(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    ecsvm_status_t status;
+
+    error_message[0] = '\0';
+    status = ecsvm_engine_register_builtin_components(engine);
+    if (status == ECSVM_OK) {
+        status = ecsvm_ecsbin_register_components(engine, module);
+    }
+    if (status == ECSVM_OK) {
+        status = ecsvm_engine_load_functions(engine, module, error_message, error_message_capacity);
+    }
+    return status;
+}
+
+static int ecsvm_register_module_runtime(
+    ecsvm_engine_t *engine,
+    ecsvm_managed_runtime_t *runtime,
+    const ecsvm_ecsbin_module_t *module,
+    ecsvm_time_system_t *time_system,
+#if ECSVM_ENABLE_SDL3
+    ecsvm_window_system_t *window_system,
+    ecsvm_renderer_system_t *renderer_system,
+#endif
+    ecsvm_managed_system_binding_t *bindings,
+    size_t binding_count,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    runtime->module = module;
+    return ecsvm_register_native_systems(
+               engine,
+               module,
+               time_system,
+#if ECSVM_ENABLE_SDL3
+               window_system,
+               renderer_system,
+#endif
+               error_message,
+               error_message_capacity
+           ) &&
+        ecsvm_register_managed_systems(
+            engine,
+            runtime,
+            module,
+            bindings,
+            binding_count,
+            error_message,
+            error_message_capacity
+        );
+}
+
+static int ecsvm_allocate_and_register_module_runtime(
+    ecsvm_engine_t *engine,
+    ecsvm_managed_runtime_t *runtime,
+    const ecsvm_ecsbin_module_t *module,
+    ecsvm_time_system_t *time_system,
+#if ECSVM_ENABLE_SDL3
+    ecsvm_window_system_t *window_system,
+    ecsvm_renderer_system_t *renderer_system,
+#endif
+    ecsvm_managed_system_binding_t **bindings,
+    size_t *binding_count,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    if (!ecsvm_allocate_managed_bindings(
+            module,
+            bindings,
+            binding_count,
+            error_message,
+            error_message_capacity
+        )) {
+        return 0;
+    }
+
+    if (!ecsvm_register_module_runtime(
+            engine,
+            runtime,
+            module,
+            time_system,
+#if ECSVM_ENABLE_SDL3
+            window_system,
+            renderer_system,
+#endif
+            *bindings,
+            *binding_count,
+            error_message,
+            error_message_capacity
+        )) {
+        free(*bindings);
+        *bindings = NULL;
+        *binding_count = 0u;
+        return 0;
+    }
+
+    return 1;
+}
+
+#if ECSVM_ENABLE_SDL3
+static int ecsvm_create_optional_sdl_systems(
+    ecsvm_engine_t *engine,
+    const ecsvm_ecsbin_module_t *module,
+    ecsvm_window_system_t **window_system,
+    ecsvm_renderer_system_t **renderer_system,
+    const char *log_prefix
+)
+{
+    if (ecsvm_module_requires_window_system(module)) {
+        *window_system = ecsvm_create_default_window_system();
+        if (*window_system == NULL) {
+            ecsvm_managed_log_prefixed(log_prefix, "failed to create SDL window system");
+            return 0;
+        }
+    }
+
+    if (ecsvm_module_requires_renderer_system(module)) {
+        *renderer_system = ecsvm_create_default_renderer_system(engine, *window_system);
+        if (*renderer_system == NULL) {
+            ecsvm_managed_log_prefixed(log_prefix, "failed to create SDL renderer system");
+            if (*window_system != NULL) {
+                ecsvm_window_system_destroy(*window_system);
+                *window_system = NULL;
+            }
+            return 0;
+        }
+    }
+
+    return 1;
+}
+#endif
+
 static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runtime)
 {
     char error_message[512];
@@ -2338,7 +2487,6 @@ static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runti
     }
 
     ecsvm_unregister_project_runtime_systems(runtime->engine, runtime->module);
-    runtime->managed_runtime.module = runtime->module;
     status = ecsvm_engine_load_functions(
         runtime->engine,
         runtime->module,
@@ -2346,35 +2494,25 @@ static int ecsvm_restore_previous_project_runtime(ecsvm_project_runtime_t *runti
         sizeof(error_message)
     );
     if (status != ECSVM_OK) {
-        fprintf(
-            stderr,
-            "hotreload: failed to restore previous function table: %s\n",
-            error_message[0] != '\0' ? error_message : ecsvm_status_string(status)
-        );
+        ecsvm_managed_log_status("hotreload: failed to restore previous function table", status, error_message);
         return 0;
     }
 
-    if (!ecsvm_register_native_systems(
+    if (!ecsvm_register_module_runtime(
             runtime->engine,
+            &runtime->managed_runtime,
             runtime->module,
             &runtime->time_system,
 #if ECSVM_ENABLE_SDL3
             runtime->window_system,
             runtime->renderer_system,
 #endif
-            error_message,
-            sizeof(error_message)
-        ) ||
-        !ecsvm_register_managed_systems(
-            runtime->engine,
-            &runtime->managed_runtime,
-            runtime->module,
             runtime->bindings,
             runtime->binding_count,
             error_message,
             sizeof(error_message)
         )) {
-        fprintf(stderr, "hotreload: failed to restore previous systems: %s\n", error_message);
+        ecsvm_managed_log_prefixed("hotreload: failed to restore previous systems", error_message);
         return 0;
     }
 
@@ -2413,17 +2551,13 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         sizeof(error_message)
     );
     if (status != ECSVM_OK) {
-        fprintf(
-            stderr,
-            "hotreload: build failed: %s\n",
-            error_message[0] != '\0' ? error_message : ecsvm_status_string(status)
-        );
+        ecsvm_managed_log_status("hotreload: build failed", status, error_message);
         return 0;
     }
 
     next_module = ecsvm_managed_load_module(output_path, error_message, sizeof(error_message));
     if (next_module == NULL) {
-        fprintf(stderr, "hotreload: failed to load ecsbin: %s\n", error_message);
+        ecsvm_managed_log_prefixed("hotreload: failed to load ecsbin", error_message);
         return 0;
     }
 
@@ -2433,7 +2567,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
             error_message,
             sizeof(error_message)
         )) {
-        fprintf(stderr, "%s\n", error_message);
+        ecsvm_managed_log_line(error_message);
         ecsvm_managed_unload_module(next_module);
         return 0;
     }
@@ -2447,7 +2581,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
             error_message,
             sizeof(error_message)
         )) {
-        fprintf(stderr, "hotreload: %s\n", error_message);
+        ecsvm_managed_log_prefixed("hotreload", error_message);
         ecsvm_managed_unload_module(next_module);
         return 0;
     }
@@ -2463,7 +2597,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     if (keep_window_system && next_window_system == NULL) {
         created_window_system = ecsvm_create_default_window_system();
         if (created_window_system == NULL) {
-            fprintf(stderr, "hotreload: failed to create SDL window system\n");
+            ecsvm_managed_log_line("hotreload: failed to create SDL window system");
             free(next_bindings);
             ecsvm_managed_unload_module(next_module);
             return 0;
@@ -2474,7 +2608,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     if (keep_renderer_system && next_renderer_system == NULL) {
         created_renderer_system = ecsvm_create_default_renderer_system(runtime->engine, next_window_system);
         if (created_renderer_system == NULL) {
-            fprintf(stderr, "hotreload: failed to create SDL renderer system\n");
+            ecsvm_managed_log_line("hotreload: failed to create SDL renderer system");
             ecsvm_window_system_destroy(created_window_system);
             free(next_bindings);
             ecsvm_managed_unload_module(next_module);
@@ -2491,7 +2625,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         sizeof(error_message)
     );
     if (status != ECSVM_OK) {
-        fprintf(stderr, "hotreload: %s\n", error_message);
+        ecsvm_managed_log_prefixed("hotreload", error_message);
 #if ECSVM_ENABLE_SDL3
         ecsvm_renderer_system_destroy(created_renderer_system);
         ecsvm_window_system_destroy(created_window_system);
@@ -2509,14 +2643,10 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         sizeof(error_message)
     );
     if (status != ECSVM_OK) {
-        fprintf(
-            stderr,
-            "hotreload: failed to reload function table: %s\n",
-            error_message[0] != '\0' ? error_message : ecsvm_status_string(status)
-        );
+        ecsvm_managed_log_status("hotreload: failed to reload function table", status, error_message);
         ecsvm_unregister_project_runtime_systems(runtime->engine, next_module);
         if (!ecsvm_restore_previous_project_runtime(runtime)) {
-            fprintf(stderr, "hotreload: previous runtime state could not be restored\n");
+            ecsvm_managed_log_line("hotreload: previous runtime state could not be restored");
             status = ECSVM_ERROR_CALLBACK;
         }
 #if ECSVM_ENABLE_SDL3
@@ -2528,31 +2658,24 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
         return status == ECSVM_ERROR_CALLBACK ? -1 : 0;
     }
 
-    runtime->managed_runtime.module = next_module;
-    if (!ecsvm_register_native_systems(
+    if (!ecsvm_register_module_runtime(
             runtime->engine,
+            &runtime->managed_runtime,
             next_module,
             &runtime->time_system,
 #if ECSVM_ENABLE_SDL3
             next_window_system,
             next_renderer_system,
 #endif
-            error_message,
-            sizeof(error_message)
-        ) ||
-        !ecsvm_register_managed_systems(
-            runtime->engine,
-            &runtime->managed_runtime,
-            next_module,
             next_bindings,
             next_binding_count,
             error_message,
             sizeof(error_message)
         )) {
-        fprintf(stderr, "hotreload: %s\n", error_message);
+        ecsvm_managed_log_prefixed("hotreload", error_message);
         ecsvm_unregister_project_runtime_systems(runtime->engine, next_module);
         if (!ecsvm_restore_previous_project_runtime(runtime)) {
-            fprintf(stderr, "hotreload: previous runtime state could not be restored\n");
+            ecsvm_managed_log_line("hotreload: previous runtime state could not be restored");
 #if ECSVM_ENABLE_SDL3
             ecsvm_renderer_system_destroy(created_renderer_system);
             ecsvm_window_system_destroy(created_window_system);
@@ -2595,7 +2718,7 @@ static int ecsvm_project_runtime_reload(ecsvm_project_runtime_t *runtime)
     runtime->bindings = next_bindings;
     runtime->binding_count = next_binding_count;
     runtime->managed_runtime.module = runtime->module;
-    fprintf(stderr, "hotreload: reloaded project systems\n");
+    ecsvm_managed_log_line("hotreload: reloaded project systems");
     return 1;
 }
 
@@ -2645,92 +2768,57 @@ static int ecsvm_run_loaded_ecs_module(const ecsvm_ecsbin_module_t *module)
     exit_code = 1;
 
     if (ecsvm_count_managed_systems(module) == 0u) {
-        fprintf(stderr, "no managed systems found in module\n");
+        ecsvm_managed_log_line("no managed systems found in module");
         return 1;
     }
 
     engine = ecsvm_engine_create();
     if (engine == NULL) {
-        fprintf(stderr, "failed to create engine\n");
+        ecsvm_managed_log_line("failed to create engine");
         return 1;
     }
 
     runtime.engine = engine;
-    runtime.module = module;
-    error_message[0] = '\0';
-    status = ecsvm_engine_register_builtin_components(engine);
-    if (status == ECSVM_OK) {
-        status = ecsvm_ecsbin_register_components(engine, module);
-    }
-    if (status == ECSVM_OK) {
-        status = ecsvm_engine_load_functions(engine, module, error_message, sizeof(error_message));
-    }
+    status = ecsvm_prepare_engine_for_module(engine, module, error_message, sizeof(error_message));
     if (status != ECSVM_OK) {
-        if (error_message[0] != '\0') {
-            fprintf(stderr, "failed to register managed module state: %s\n", error_message);
-        } else {
-            fprintf(stderr, "failed to register managed module state: %s\n", ecsvm_status_string(status));
-        }
+        ecsvm_managed_log_status("failed to register managed module state", status, error_message);
         ecsvm_engine_destroy(engine);
         return 1;
     }
 
 #if ECSVM_ENABLE_SDL3
-    if (ecsvm_module_requires_window_system(module)) {
-        window_system = ecsvm_create_default_window_system();
-        if (window_system == NULL) {
-            fprintf(stderr, "failed to create SDL window system\n");
-            goto cleanup;
-        }
-    }
-
-    if (ecsvm_module_requires_renderer_system(module)) {
-        renderer_system = ecsvm_create_default_renderer_system(engine, window_system);
-        if (renderer_system == NULL) {
-            fprintf(stderr, "failed to create SDL renderer system\n");
-            goto cleanup;
-        }
+    if (!ecsvm_create_optional_sdl_systems(
+            engine,
+            module,
+            &window_system,
+            &renderer_system,
+            "run"
+        )) {
+        goto cleanup;
     }
 #endif
 
-    if (!ecsvm_register_native_systems(
+    if (!ecsvm_allocate_and_register_module_runtime(
             engine,
+            &runtime,
             module,
             &time_system,
 #if ECSVM_ENABLE_SDL3
             window_system,
             renderer_system,
 #endif
-            error_message,
-            sizeof(error_message)
-        )) {
-        fprintf(stderr, "%s\n", error_message);
-        goto cleanup;
-    }
-
-    if (!ecsvm_allocate_managed_bindings(
-            module,
             &bindings,
             &binding_count,
             error_message,
             sizeof(error_message)
-        ) ||
-        !ecsvm_register_managed_systems(
-            engine,
-            &runtime,
-            module,
-            bindings,
-            binding_count,
-            error_message,
-            sizeof(error_message)
         )) {
-        fprintf(stderr, "%s\n", error_message);
+        ecsvm_managed_log_line(error_message);
         goto cleanup;
     }
 
     status = ecsvm_engine_run(engine);
     if (status != ECSVM_OK) {
-        fprintf(stderr, "managed runtime failed: %s\n", ecsvm_status_string(status));
+        ecsvm_managed_log_status("managed runtime failed", status, NULL);
         goto cleanup;
     }
 
@@ -2761,7 +2849,7 @@ int ecsvm_run_ecsbin(const char *ecsbin_path)
         sizeof(error_message)
     );
     if (status != ECSVM_OK) {
-        fprintf(stderr, "failed to load ecsbin: %s\n", error_message[0] != '\0' ? error_message : ecsvm_status_string(status));
+        ecsvm_managed_log_status("failed to load ecsbin", status, error_message);
         return 1;
     }
 
@@ -2778,52 +2866,40 @@ int ecsvm_run_project(const char *project_path, const char *core_library_path, c
     int exit_code;
 
     memset(&runtime, 0, sizeof(runtime));
-    runtime.project_path = ecsvm_managed_copy_string(project_path);
-    runtime.core_library_path = core_library_path != NULL ? ecsvm_managed_copy_string(core_library_path) : NULL;
-    runtime.ecsbin_path = ecsvm_managed_copy_string(ecsbin_path);
+    runtime.project_path = ecsvm_copy_string(project_path);
+    runtime.core_library_path = core_library_path != NULL ? ecsvm_copy_string(core_library_path) : NULL;
+    runtime.ecsbin_path = ecsvm_copy_string(ecsbin_path);
     if (runtime.project_path == NULL ||
         (core_library_path != NULL && runtime.core_library_path == NULL) ||
         runtime.ecsbin_path == NULL) {
-        fprintf(stderr, "failed to prepare project runtime\n");
+        ecsvm_managed_log_line("failed to prepare project runtime");
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
 
     runtime.module = ecsvm_managed_load_module(runtime.ecsbin_path, error_message, sizeof(error_message));
     if (runtime.module == NULL) {
-        fprintf(stderr, "failed to load ecsbin: %s\n", error_message);
+        ecsvm_managed_log_prefixed("failed to load ecsbin", error_message);
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
 
     runtime.engine = ecsvm_engine_create();
     if (runtime.engine == NULL) {
-        fprintf(stderr, "failed to create engine\n");
+        ecsvm_managed_log_line("failed to create engine");
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
 
     runtime.managed_runtime.engine = runtime.engine;
-    runtime.managed_runtime.module = runtime.module;
-    error_message[0] = '\0';
-    status = ecsvm_engine_register_builtin_components(runtime.engine);
-    if (status == ECSVM_OK) {
-        status = ecsvm_ecsbin_register_components(runtime.engine, runtime.module);
-    }
-    if (status == ECSVM_OK) {
-        status = ecsvm_engine_load_functions(
-            runtime.engine,
-            runtime.module,
-            error_message,
-            sizeof(error_message)
-        );
-    }
+    status = ecsvm_prepare_engine_for_module(
+        runtime.engine,
+        runtime.module,
+        error_message,
+        sizeof(error_message)
+    );
     if (status != ECSVM_OK) {
-        fprintf(
-            stderr,
-            "failed to register managed module state: %s\n",
-            error_message[0] != '\0' ? error_message : ecsvm_status_string(status)
-        );
+        ecsvm_managed_log_status("failed to register managed module state", status, error_message);
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
@@ -2834,66 +2910,46 @@ int ecsvm_run_project(const char *project_path, const char *core_library_path, c
             error_message,
             sizeof(error_message)
         )) {
-        fprintf(stderr, "failed to initialize hotreload watcher: %s\n", error_message);
+        ecsvm_managed_log_prefixed("failed to initialize hotreload watcher", error_message);
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
 
     status = ecsvm_hotreload_system_register(runtime.engine, &runtime.hotreload_system);
     if (status != ECSVM_OK) {
-        fprintf(stderr, "failed to register hotreload system: %s\n", ecsvm_status_string(status));
+        ecsvm_managed_log_status("failed to register hotreload system", status, NULL);
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
 
 #if ECSVM_ENABLE_SDL3
-    if (ecsvm_module_requires_window_system(runtime.module)) {
-        runtime.window_system = ecsvm_create_default_window_system();
-        if (runtime.window_system == NULL) {
-            fprintf(stderr, "failed to create SDL window system\n");
-            ecsvm_project_runtime_free(&runtime);
-            return 1;
-        }
-    }
-
-    if (ecsvm_module_requires_renderer_system(runtime.module)) {
-        runtime.renderer_system = ecsvm_create_default_renderer_system(runtime.engine, runtime.window_system);
-        if (runtime.renderer_system == NULL) {
-            fprintf(stderr, "failed to create SDL renderer system\n");
-            ecsvm_project_runtime_free(&runtime);
-            return 1;
-        }
+    if (!ecsvm_create_optional_sdl_systems(
+            runtime.engine,
+            runtime.module,
+            &runtime.window_system,
+            &runtime.renderer_system,
+            "run"
+        )) {
+        ecsvm_project_runtime_free(&runtime);
+        return 1;
     }
 #endif
 
-    if (!ecsvm_register_native_systems(
+    if (!ecsvm_allocate_and_register_module_runtime(
             runtime.engine,
+            &runtime.managed_runtime,
             runtime.module,
             &runtime.time_system,
 #if ECSVM_ENABLE_SDL3
             runtime.window_system,
             runtime.renderer_system,
 #endif
-            error_message,
-            sizeof(error_message)
-        ) ||
-        !ecsvm_allocate_managed_bindings(
-            runtime.module,
             &runtime.bindings,
             &runtime.binding_count,
             error_message,
             sizeof(error_message)
-        ) ||
-        !ecsvm_register_managed_systems(
-            runtime.engine,
-            &runtime.managed_runtime,
-            runtime.module,
-            runtime.bindings,
-            runtime.binding_count,
-            error_message,
-            sizeof(error_message)
         )) {
-        fprintf(stderr, "%s\n", error_message);
+        ecsvm_managed_log_line(error_message);
         ecsvm_project_runtime_free(&runtime);
         return 1;
     }
@@ -2904,7 +2960,7 @@ int ecsvm_run_project(const char *project_path, const char *core_library_path, c
     while (!ecsvm_engine_stop_requested(runtime.engine)) {
         status = ecsvm_engine_tick(runtime.engine);
         if (status != ECSVM_OK) {
-            fprintf(stderr, "managed runtime failed: %s\n", ecsvm_status_string(status));
+            ecsvm_managed_log_status("managed runtime failed", status, NULL);
             break;
         }
 

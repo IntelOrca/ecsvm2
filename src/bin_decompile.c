@@ -8,52 +8,11 @@
 static const char *ecsvm_ecsbin_token_text(ecsvm_ecsbin_token_kind_t kind)
 {
     switch (kind) {
-        case ECSVM_ECSBIN_TOKEN_LBRACE: return "{";
-        case ECSVM_ECSBIN_TOKEN_RBRACE: return "}";
-        case ECSVM_ECSBIN_TOKEN_LBRACKET: return "[";
-        case ECSVM_ECSBIN_TOKEN_RBRACKET: return "]";
-        case ECSVM_ECSBIN_TOKEN_LPAREN: return "(";
-        case ECSVM_ECSBIN_TOKEN_RPAREN: return ")";
-        case ECSVM_ECSBIN_TOKEN_COLON: return ":";
-        case ECSVM_ECSBIN_TOKEN_SEMICOLON: return ";";
-        case ECSVM_ECSBIN_TOKEN_DOT: return ".";
-        case ECSVM_ECSBIN_TOKEN_COMMA: return ",";
-        case ECSVM_ECSBIN_TOKEN_EQUAL: return "=";
-        case ECSVM_ECSBIN_TOKEN_BANG: return "!";
-        case ECSVM_ECSBIN_TOKEN_PLUS: return "+";
-        case ECSVM_ECSBIN_TOKEN_MINUS: return "-";
-        case ECSVM_ECSBIN_TOKEN_STAR: return "*";
-        case ECSVM_ECSBIN_TOKEN_SLASH: return "/";
-        case ECSVM_ECSBIN_TOKEN_PERCENT: return "%";
-        case ECSVM_ECSBIN_TOKEN_LT: return "<";
-        case ECSVM_ECSBIN_TOKEN_GT: return ">";
-        case ECSVM_ECSBIN_TOKEN_AMPERSAND: return "&";
-        case ECSVM_ECSBIN_TOKEN_PIPE: return "|";
-        case ECSVM_ECSBIN_TOKEN_CARET: return "^";
-        case ECSVM_ECSBIN_TOKEN_TILDE: return "~";
-        case ECSVM_ECSBIN_TOKEN_KEY_IMPORT: return "import";
-        case ECSVM_ECSBIN_TOKEN_KEY_NAMESPACE: return "namespace";
-        case ECSVM_ECSBIN_TOKEN_KEY_STRUCT: return "struct";
-        case ECSVM_ECSBIN_TOKEN_KEY_COMPONENT: return "component";
-        case ECSVM_ECSBIN_TOKEN_KEY_ATTRIBUTE: return "attribute";
-        case ECSVM_ECSBIN_TOKEN_KEY_SYSTEM: return "system";
-        case ECSVM_ECSBIN_TOKEN_KEY_CONST: return "const";
-        case ECSVM_ECSBIN_TOKEN_KEY_FN: return "fn";
-        case ECSVM_ECSBIN_TOKEN_KEY_IF: return "if";
-        case ECSVM_ECSBIN_TOKEN_KEY_FOR: return "for";
-        case ECSVM_ECSBIN_TOKEN_KEY_IN: return "in";
-        case ECSVM_ECSBIN_TOKEN_KEY_ELSE: return "else";
-        case ECSVM_ECSBIN_TOKEN_KEY_LET: return "let";
-        case ECSVM_ECSBIN_TOKEN_KEY_RETURN: return "return";
-        case ECSVM_ECSBIN_TOKEN_KEY_TRUE: return "true";
-        case ECSVM_ECSBIN_TOKEN_KEY_FALSE: return "false";
-        case ECSVM_ECSBIN_TOKEN_KEY_NULL: return "null";
-        case ECSVM_ECSBIN_TOKEN_EOF:
-        case ECSVM_ECSBIN_TOKEN_IDENTIFIER:
-        case ECSVM_ECSBIN_TOKEN_NUMBER:
-        case ECSVM_ECSBIN_TOKEN_STRING:
-        default:
-            return NULL;
+#define ECSVM_BIN_TOKEN_TEXT(name, assign, text) case ECSVM_ECSBIN_TOKEN_##name: return text;
+        ECSVM_TOKEN_KIND_ITEMS(ECSVM_BIN_TOKEN_TEXT)
+#undef ECSVM_BIN_TOKEN_TEXT
+    default:
+        return NULL;
     }
 }
 

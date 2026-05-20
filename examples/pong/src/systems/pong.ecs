@@ -1,22 +1,22 @@
 import core;
 
 namespace pong {
-    const DEFAULT_WINDOW_WIDTH: f32 = 960.0;
-    const DEFAULT_WINDOW_HEIGHT: f32 = 540.0;
-    const PADDLE_WIDTH: f32 = 16.0;
-    const PADDLE_HEIGHT: f32 = 100.0;
-    const BALL_SIZE: f32 = 16.0;
-    const BALL_SPEED: f32 = 420.0;
-    const WALL_THICKNESS: f32 = 20.0;
-    const GOAL_THICKNESS: f32 = 24.0;
-    const LEFT_PADDLE_X: f32 = 40.0;
-    const RIGHT_PADDLE_MARGIN: f32 = 40.0;
-    const CENTER_LINE_WIDTH: f32 = 6.0;
-    const SIDE_NONE: i32 = 0;
-    const SIDE_LEFT: i32 = -1;
-    const SIDE_RIGHT: i32 = 1;
-    const KEY_DOWN: i32 = 81;
-    const KEY_UP: i32 = 82;
+    const DEFAULT_WINDOW_WIDTH = 960.0;
+    const DEFAULT_WINDOW_HEIGHT = 540.0;
+    const PADDLE_WIDTH = 16.0;
+    const PADDLE_HEIGHT = 100.0;
+    const BALL_SIZE = 16.0;
+    const BALL_SPEED = 420.0;
+    const WALL_THICKNESS = 20.0;
+    const GOAL_THICKNESS = 24.0;
+    const LEFT_PADDLE_X = 40.0;
+    const RIGHT_PADDLE_MARGIN = 40.0;
+    const CENTER_LINE_WIDTH = 6.0;
+    const SIDE_NONE = 0;
+    const SIDE_LEFT = -1;
+    const SIDE_RIGHT = 1;
+    const KEY_DOWN = 81;
+    const KEY_UP = 82;
 
     fn abs(value: f32): f32 {
         if (value < 0.0) {
@@ -40,7 +40,7 @@ namespace pong {
 
     fn window_width_from_entity(window_entity: entity): f32 {
         if (window_entity != null) {
-            let window: Window = window_entity[Window];
+            const window = window_entity[Window];
             return window.width;
         }
 
@@ -49,7 +49,7 @@ namespace pong {
 
     fn window_height_from_entity(window_entity: entity): f32 {
         if (window_entity != null) {
-            let window: Window = window_entity[Window];
+            const window = window_entity[Window];
             return window.height;
         }
 
@@ -135,8 +135,8 @@ namespace pong {
     }
 
     fn start_ball(velocity: Velocity) {
-        let horizontal_pick: i32 = core.math.randomInt(0, 1);
-        let vertical_pick: i32 = core.math.randomInt(0, 1);
+        const horizontal_pick = core.math.randomInt(0, 1);
+        const vertical_pick = core.math.randomInt(0, 1);
 
         if (horizontal_pick == 0) {
             velocity.value.x = 0.0 - BALL_SPEED;
@@ -158,20 +158,20 @@ namespace pong {
             return;
         }
 
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = spawn();
-        let left_paddle: entity = spawn();
-        let right_paddle: entity = spawn();
-        let ball: entity = spawn();
-        let center_line: entity = spawn();
-        let top_wall: entity = spawn();
-        let bottom_wall: entity = spawn();
-        let left_goal: entity = spawn();
-        let right_goal: entity = spawn();
-        let right_up_monitor: entity = spawn();
-        let right_down_monitor: entity = spawn();
-        let right_mouse_y_monitor: entity = spawn();
-        let serve_click_monitor: entity = spawn();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = spawn();
+        const left_paddle = spawn();
+        const right_paddle = spawn();
+        const ball = spawn();
+        const center_line = spawn();
+        const top_wall = spawn();
+        const bottom_wall = spawn();
+        const left_goal = spawn();
+        const right_goal = spawn();
+        const right_up_monitor = spawn();
+        const right_down_monitor = spawn();
+        const right_mouse_y_monitor = spawn();
+        const serve_click_monitor = spawn();
 
         game_state_entity[GameState].left_paddle = left_paddle;
         game_state_entity[GameState].right_paddle = right_paddle;
@@ -211,13 +211,11 @@ namespace pong {
         left_paddle[Transform].scale.x = PADDLE_WIDTH;
         left_paddle[Transform].scale.y = PADDLE_HEIGHT;
         left_paddle[Transform].rotation = 0.0;
-        left_paddle[GraphicsShape].color.x = 1.0;
-        left_paddle[GraphicsShape].color.y = 1.0;
-        left_paddle[GraphicsShape].color.z = 1.0;
-        left_paddle[GraphicsShape].color.w = 1.0;
+        left_paddle[GraphicsShape].color = {
+            x: 1.0, y: 1.0, z: 1.0, w: 1.0
+        };
         left_paddle[GraphicsShape].kind = core.graphics.SHAPE_RECTANGLE;
-        left_paddle[Collision].size.x = PADDLE_WIDTH;
-        left_paddle[Collision].size.y = PADDLE_HEIGHT;
+        left_paddle[Collision].size = { x: PADDLE_WIDTH, y: PADDLE_HEIGHT };
         left_paddle[RigidBody].restitution = 1.0;
         left_paddle[RigidBody].immovable = true;
         left_paddle[Paddle].speed = 500.0;
@@ -226,13 +224,11 @@ namespace pong {
 
         right_paddle[Transform].position.x = window_width_from_entity(window_entity) - RIGHT_PADDLE_MARGIN;
         right_paddle[Transform].position.y = window_height_from_entity(window_entity) * 0.5;
-        right_paddle[Transform].scale.x = PADDLE_WIDTH;
-        right_paddle[Transform].scale.y = PADDLE_HEIGHT;
+        right_paddle[Transform].scale = { x: PADDLE_WIDTH, y: PADDLE_HEIGHT };
         right_paddle[Transform].rotation = 0.0;
-        right_paddle[GraphicsShape].color.x = 1.0;
-        right_paddle[GraphicsShape].color.y = 1.0;
-        right_paddle[GraphicsShape].color.z = 1.0;
-        right_paddle[GraphicsShape].color.w = 1.0;
+        right_paddle[GraphicsShape].color = {
+            x: 1.0, y: 1.0, z: 1.0, w: 1.0
+        };
         right_paddle[GraphicsShape].kind = core.graphics.SHAPE_RECTANGLE;
         right_paddle[Collision].size.x = PADDLE_WIDTH;
         right_paddle[Collision].size.y = PADDLE_HEIGHT;
@@ -245,27 +241,24 @@ namespace pong {
         ball[Transform].scale.x = BALL_SIZE;
         ball[Transform].scale.y = BALL_SIZE;
         ball[Transform].rotation = 0.0;
-        ball[GraphicsShape].color.x = 1.0;
-        ball[GraphicsShape].color.y = 0.85;
-        ball[GraphicsShape].color.z = 0.2;
-        ball[GraphicsShape].color.w = 1.0;
+        ball[GraphicsShape].color = {
+            x: 1.0, y: 0.85, z: 0.2, w: 1.0
+        };
         ball[GraphicsShape].kind = core.graphics.SHAPE_CIRCLE;
         ball[Collision].size.x = BALL_SIZE;
         ball[Collision].size.y = BALL_SIZE;
         ball[RigidBody].restitution = 1.0;
         ball[RigidBody].immovable = false;
-        ball[Velocity].value.x = 0.0;
-        ball[Velocity].value.y = 0.0;
+        ball[Velocity].value = {};
 
         center_line[Transform].position.x = window_width_from_entity(window_entity) * 0.5;
         center_line[Transform].position.y = window_height_from_entity(window_entity) * 0.5;
         center_line[Transform].scale.x = CENTER_LINE_WIDTH;
         center_line[Transform].scale.y = window_height_from_entity(window_entity) * 0.8;
         center_line[Transform].rotation = 0.0;
-        center_line[GraphicsShape].color.x = 1.0;
-        center_line[GraphicsShape].color.y = 1.0;
-        center_line[GraphicsShape].color.z = 1.0;
-        center_line[GraphicsShape].color.w = 0.15;
+        center_line[GraphicsShape].color = {
+            x: 1.0, y: 1.0, z: 1.0, w: 0.15
+        };
         center_line[GraphicsShape].kind = core.graphics.SHAPE_RECTANGLE;
 
         top_wall[Transform].position.x = window_width_from_entity(window_entity) * 0.5;
@@ -312,21 +305,21 @@ namespace pong {
     [Before(pong.Physics)]
     [Before(core.Renderer)]
     system ControlBots {
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = getFirstEntity<GameState>();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = getFirstEntity<GameState>();
 
         if (window_entity == null || game_state_entity == null) {
             return;
         }
 
-        let window: Window = window_entity[Window];
-        let game_state: GameState = game_state_entity[GameState];
-        let ball: Transform = game_state.ball[Transform];
+        const window = window_entity[Window];
+        const game_state = game_state_entity[GameState];
+        const ball = game_state.ball[Transform];
 
         for (bot_entity in getEntities(Bot)) {
-            let paddle: Transform = bot_entity[Transform];
-            let collision: Collision = bot_entity[Collision];
-            let bot: Bot = bot_entity[Bot];
+            const paddle = bot_entity[Transform];
+            const collision = bot_entity[Collision];
+            const bot = bot_entity[Bot];
 
             paddle.position.y = clamp_paddle_y(
                 window,
@@ -345,22 +338,22 @@ namespace pong {
     [Before(pong.Physics)]
     [Before(core.Renderer)]
     system ControlRightPaddle {
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = getFirstEntity<GameState>();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = getFirstEntity<GameState>();
 
         if (window_entity == null || game_state_entity == null) {
             return;
         }
 
-        let window: Window = window_entity[Window];
-        let game_state: GameState = game_state_entity[GameState];
-        let paddle: Transform = game_state.right_paddle[Transform];
-        let paddle_collision: Collision = game_state.right_paddle[Collision];
-        let paddle_settings: Paddle = game_state.right_paddle[Paddle];
-        let up_monitor: InputMonitor = game_state.right_up_monitor[InputMonitor];
-        let down_monitor: InputMonitor = game_state.right_down_monitor[InputMonitor];
-        let mouse_monitor: InputMonitor = game_state.right_mouse_y_monitor[InputMonitor];
-        let keyboard_input: f32 = down_monitor.value - up_monitor.value;
+        const window = window_entity[Window];
+        const game_state = game_state_entity[GameState];
+        const paddle = game_state.right_paddle[Transform];
+        const paddle_collision = game_state.right_paddle[Collision];
+        const paddle_settings = game_state.right_paddle[Paddle];
+        const up_monitor = game_state.right_up_monitor[InputMonitor];
+        const down_monitor = game_state.right_down_monitor[InputMonitor];
+        const mouse_monitor = game_state.right_mouse_y_monitor[InputMonitor];
+        const keyboard_input = down_monitor.value - up_monitor.value;
 
         if (abs(keyboard_input) > 0.0) {
             paddle.position.y = clamp_paddle_y(
@@ -386,23 +379,23 @@ namespace pong {
     [Before(pong.Physics)]
     [Before(core.Renderer)]
     system StartServe {
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = getFirstEntity<GameState>();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = getFirstEntity<GameState>();
 
         if (window_entity == null || game_state_entity == null) {
             return;
         }
 
-        let window: Window = window_entity[Window];
-        let game_state: GameState = game_state_entity[GameState];
-        let click_monitor: InputMonitor = game_state.serve_click_monitor[InputMonitor];
-        let click_pressed: bool = click_monitor.value > 0.5;
+        const window = window_entity[Window];
+        const game_state = game_state_entity[GameState];
+        const click_monitor = game_state.serve_click_monitor[InputMonitor];
+        const click_pressed = click_monitor.value > 0.5;
 
         if (!game_state.round_live &&
             click_pressed &&
             !game_state.previous_serve_click) {
-            let ball: Transform = game_state.ball[Transform];
-            let velocity: Velocity = game_state.ball[Velocity];
+             const ball = game_state.ball[Transform];
+             const velocity = game_state.ball[Velocity];
 
             reset_ball(ball, velocity, window);
             start_ball(velocity);
@@ -418,23 +411,23 @@ namespace pong {
     [Before(pong.HandleGoals)]
     [Before(core.Renderer)]
     system Physics {
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = getFirstEntity<GameState>();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = getFirstEntity<GameState>();
 
         if (window_entity == null || game_state_entity == null) {
             return;
         }
 
-        let window: Window = window_entity[Window];
-        let game_state: GameState = game_state_entity[GameState];
+        const window = window_entity[Window];
+        const game_state = game_state_entity[GameState];
         if (!game_state.round_live) {
             return;
         }
 
         for (moving_entity in getEntities(Velocity)) {
-            let moving_transform: Transform = moving_entity[Transform];
-            let moving_velocity: Velocity = moving_entity[Velocity];
-            let moving_collision: Collision = moving_entity[Collision];
+            const moving_transform = moving_entity[Transform];
+            const moving_velocity = moving_entity[Velocity];
+            const moving_collision = moving_entity[Collision];
 
             if (!(moving_velocity.value.x == 0.0 &&
                   moving_velocity.value.y == 0.0)) {
@@ -445,8 +438,8 @@ namespace pong {
                 moving_transform.rotation = moving_transform.rotation + (2.5 * window.delta_seconds);
 
                 for (goal_entity in getEntities(Goal)) {
-                    let goal_transform: Transform = goal_entity[Transform];
-                    let goal_collision: Collision = goal_entity[Collision];
+                    const goal_transform = goal_entity[Transform];
+                    const goal_collision = goal_entity[Collision];
 
                     if (game_state.round_live &&
                         overlaps(
@@ -455,7 +448,7 @@ namespace pong {
                             goal_transform,
                             goal_collision
                         )) {
-                        let goal: Goal = goal_entity[Goal];
+                        const goal = goal_entity[Goal];
                         game_state.pending_goal_side = goal.scorer;
                         game_state.round_live = false;
                         moving_velocity.value.x = 0.0;
@@ -465,9 +458,9 @@ namespace pong {
 
                 if (game_state.round_live) {
                     for (solid_entity in getEntities(RigidBody)) {
-                        let solid_transform: Transform = solid_entity[Transform];
-                        let solid_collision: Collision = solid_entity[Collision];
-                        let solid_body: RigidBody = solid_entity[RigidBody];
+                        const solid_transform = solid_entity[Transform];
+                        const solid_collision = solid_entity[Collision];
+                        const solid_body = solid_entity[RigidBody];
 
                         if (solid_entity != moving_entity &&
                             overlaps(
@@ -541,21 +534,21 @@ namespace pong {
     [After(pong.Physics)]
     [Before(core.Renderer)]
     system HandleGoals {
-        let window_entity: entity = getFirstEntity<Window>();
-        let game_state_entity: entity = getFirstEntity<GameState>();
+        const window_entity = getFirstEntity<Window>();
+        const game_state_entity = getFirstEntity<GameState>();
 
         if (window_entity == null || game_state_entity == null) {
             return;
         }
 
-        let window: Window = window_entity[Window];
-        let game_state: GameState = game_state_entity[GameState];
+        const window = window_entity[Window];
+        const game_state = game_state_entity[GameState];
         if (game_state.pending_goal_side == SIDE_NONE) {
             return;
         }
 
-        let ball: Transform = game_state.ball[Transform];
-        let velocity: Velocity = game_state.ball[Velocity];
+        const ball = game_state.ball[Transform];
+        const velocity = game_state.ball[Velocity];
 
         if (game_state.pending_goal_side == SIDE_LEFT) {
             game_state.left_score = game_state.left_score + 1;

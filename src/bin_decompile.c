@@ -851,6 +851,69 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_expression(
             }
             return ECSVM_OK;
         }
+        case ECSVM_ECSBIN_AST_NODE_OBJECT_LITERAL: {
+            ecsvm_status_t status;
+            uint32_t child_index;
+            int first;
+
+            if (!ecsvm_ecsbin_text_buffer_append_char(buffer, '{')) {
+                return ECSVM_ERROR_MEMORY;
+            }
+
+            child_index = node->first_child;
+            first = 1;
+            while (child_index != 0u) {
+                if (!first &&
+                    !ecsvm_ecsbin_text_buffer_append(buffer, ", ")) {
+                    return ECSVM_ERROR_MEMORY;
+                }
+                status = ecsvm_ecsbin_render_ast_v3_expression(
+                    module,
+                    ast,
+                    child_index,
+                    buffer,
+                    error_message,
+                    error_message_capacity
+                );
+                if (status != ECSVM_OK) {
+                    return status;
+                }
+                first = 0;
+                child_index = ast->nodes[child_index].next_sibling;
+            }
+
+            return ecsvm_ecsbin_text_buffer_append_char(buffer, '}')
+                ? ECSVM_OK
+                : ECSVM_ERROR_MEMORY;
+        }
+        case ECSVM_ECSBIN_AST_NODE_OBJECT_FIELD: {
+            ecsvm_status_t status;
+            const ecsvm_ecsbin_ast_node_t *value_node;
+
+            value_node = node->first_child == 0u
+                ? NULL
+                : ecsvm_ecsbin_ast_node(ast, node->first_child, error_message, error_message_capacity);
+            if (value_node == NULL) {
+                ecsvm_ecsbin_set_error(error_message, error_message_capacity, "object field is malformed");
+                return ECSVM_ERROR_ARGUMENT;
+            }
+
+            status = ecsvm_ecsbin_render_ast_v3_value(module, node, buffer, error_message, error_message_capacity);
+            if (status != ECSVM_OK) {
+                return status;
+            }
+            if (!ecsvm_ecsbin_text_buffer_append(buffer, ": ")) {
+                return ECSVM_ERROR_MEMORY;
+            }
+            return ecsvm_ecsbin_render_ast_v3_expression(
+                module,
+                ast,
+                node->first_child,
+                buffer,
+                error_message,
+                error_message_capacity
+            );
+        }
         case ECSVM_ECSBIN_AST_NODE_MEMBER_EXPRESSION:
         case ECSVM_ECSBIN_AST_NODE_INDEX_EXPRESSION:
         case ECSVM_ECSBIN_AST_NODE_ASSIGNMENT_EXPRESSION:
@@ -1039,7 +1102,10 @@ static ecsvm_status_t ecsvm_ecsbin_render_ast_v3_statement(
             }
 
             if (name_node == NULL ||
-                !ecsvm_ecsbin_text_buffer_append(buffer, "let ")) {
+                !ecsvm_ecsbin_text_buffer_append(
+                    buffer,
+                    node->token_kind == ECSVM_ECSBIN_TOKEN_KEY_CONST ? "const " : "let "
+                )) {
                 return ECSVM_ERROR_MEMORY;
             }
             status = ecsvm_ecsbin_render_ast_v3_expression(module, ast, node->first_child, buffer, error_message, error_message_capacity);

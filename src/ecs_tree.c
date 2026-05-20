@@ -57,11 +57,15 @@ static const char *ecsvm_ecs_tree_syntax_kind_string(ecsvm_syntax_kind_t kind)
         return "member_expression";
     case ECSVM_SYNTAX_INDEX_EXPRESSION:
         return "index_expression";
-    case ECSVM_SYNTAX_GROUPING_EXPRESSION:
-        return "grouping_expression";
-    case ECSVM_SYNTAX_LITERAL_EXPRESSION:
-        return "literal_expression";
-    }
+     case ECSVM_SYNTAX_GROUPING_EXPRESSION:
+         return "grouping_expression";
+     case ECSVM_SYNTAX_LITERAL_EXPRESSION:
+         return "literal_expression";
+     case ECSVM_SYNTAX_OBJECT_LITERAL:
+         return "object_literal";
+     case ECSVM_SYNTAX_OBJECT_FIELD:
+         return "object_field";
+     }
 
     return "unknown";
 }

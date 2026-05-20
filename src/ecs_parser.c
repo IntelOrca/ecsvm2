@@ -429,6 +429,113 @@ static int ecsvm_parser_parse_argument_list(
     return 1;
 }
 
+static int ecsvm_parser_parse_expression(
+    ecsvm_parser_t *parser,
+    ecsvm_syntax_node_array_t *nodes,
+    size_t *out_node_index,
+    char *error_message,
+    size_t error_message_capacity
+);
+
+static int ecsvm_parser_parse_object_field(
+    ecsvm_parser_t *parser,
+    ecsvm_syntax_node_array_t *nodes,
+    size_t *out_node_index,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    size_t name_start;
+    size_t name_end;
+    size_t field_index;
+    size_t value_index;
+
+    value_index = 0u;
+    if (!ecsvm_parser_parse_identifier(
+            parser,
+            &name_start,
+            &name_end,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_push_node(
+            nodes,
+            ECSVM_SYNTAX_OBJECT_FIELD,
+            name_start,
+            &field_index,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_COLON, error_message, error_message_capacity) ||
+        !ecsvm_parser_parse_expression(
+            parser,
+            nodes,
+            &value_index,
+            error_message,
+            error_message_capacity
+        )) {
+        return 0;
+    }
+
+    (void)name_end;
+    ecsvm_syntax_node_add_child(nodes, field_index, value_index);
+    nodes->items[field_index].token_end = nodes->items[value_index].token_end;
+    *out_node_index = field_index;
+    return 1;
+}
+
+static int ecsvm_parser_parse_object_literal_expression(
+    ecsvm_parser_t *parser,
+    ecsvm_syntax_node_array_t *nodes,
+    size_t *out_node_index,
+    char *error_message,
+    size_t error_message_capacity
+)
+{
+    size_t object_index;
+
+    if (!ecsvm_parser_push_node(
+            nodes,
+            ECSVM_SYNTAX_OBJECT_LITERAL,
+            parser->index,
+            &object_index,
+            error_message,
+            error_message_capacity
+        ) ||
+        !ecsvm_parser_expect(parser, ECSVM_TOKEN_LBRACE, error_message, error_message_capacity)) {
+        return 0;
+    }
+
+    while (ecsvm_parser_current(parser)->kind != ECSVM_TOKEN_RBRACE) {
+        size_t field_index;
+
+        if (!ecsvm_parser_parse_object_field(
+                parser,
+                nodes,
+                &field_index,
+                error_message,
+                error_message_capacity
+            )) {
+            return 0;
+        }
+        ecsvm_syntax_node_add_child(nodes, object_index, field_index);
+        if (!ecsvm_parser_match(parser, ECSVM_TOKEN_COMMA)) {
+            break;
+        }
+        if (ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_RBRACE) {
+            break;
+        }
+    }
+
+    if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_RBRACE, error_message, error_message_capacity)) {
+        return 0;
+    }
+
+    nodes->items[object_index].token_end = parser->index - 1u;
+    *out_node_index = object_index;
+    return 1;
+}
+
 static int ecsvm_parser_parse_primary_expression(
     ecsvm_parser_t *parser,
     ecsvm_syntax_node_array_t *nodes,
@@ -496,6 +603,16 @@ static int ecsvm_parser_parse_primary_expression(
         nodes->items[grouping_index].token_end = parser->index - 1u;
         *out_node_index = grouping_index;
         return 1;
+    }
+
+    if (ecsvm_parser_current(parser)->kind == ECSVM_TOKEN_LBRACE) {
+        return ecsvm_parser_parse_object_literal_expression(
+            parser,
+            nodes,
+            out_node_index,
+            error_message,
+            error_message_capacity
+        );
     }
 
     ecsvm_set_error(error_message, error_message_capacity, "expected expression");
@@ -1130,9 +1247,15 @@ static int ecsvm_parser_parse_declaration_statement(
     size_t identifier_index;
     size_t type_index;
     size_t value_index;
+    int has_type;
+    int has_value;
+    int is_const;
 
     type_index = 0u;
     value_index = 0u;
+    has_type = 0;
+    has_value = 0;
+    is_const = parser->file->tokens.items[token_start].kind == ECSVM_TOKEN_KEY_CONST;
     if (!ecsvm_parser_push_node(
             nodes,
             ECSVM_SYNTAX_DECLARATION,
@@ -1155,6 +1278,7 @@ static int ecsvm_parser_parse_declaration_statement(
 
     ecsvm_syntax_node_add_child(nodes, declaration_index, identifier_index);
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_COLON)) {
+        has_type = 1;
         if (!ecsvm_parser_parse_type_expression(
                 parser,
                 nodes,
@@ -1170,6 +1294,7 @@ static int ecsvm_parser_parse_declaration_statement(
     }
 
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_EQUAL)) {
+        has_value = 1;
         if (!ecsvm_parser_parse_expression(
                 parser,
                 nodes,
@@ -1182,6 +1307,15 @@ static int ecsvm_parser_parse_declaration_statement(
         nodes->items[declaration_index].value_start = nodes->items[value_index].token_start;
         nodes->items[declaration_index].value_end = nodes->items[value_index].token_end;
         ecsvm_syntax_node_add_child(nodes, declaration_index, value_index);
+    }
+
+    if (is_const && !has_value) {
+        ecsvm_set_error(error_message, error_message_capacity, "const declaration requires initializer");
+        return 0;
+    }
+    if (!has_type && !has_value) {
+        ecsvm_set_error(error_message, error_message_capacity, "declaration without explicit type requires initializer");
+        return 0;
     }
 
     if (!ecsvm_parser_expect(parser, ECSVM_TOKEN_SEMICOLON, error_message, error_message_capacity)) {
@@ -1481,6 +1615,17 @@ static int ecsvm_parser_parse_statement(
     }
 
     if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_LET)) {
+        return ecsvm_parser_parse_declaration_statement(
+            parser,
+            nodes,
+            parser->index - 1u,
+            out_node_index,
+            error_message,
+            error_message_capacity
+        );
+    }
+
+    if (ecsvm_parser_match(parser, ECSVM_TOKEN_KEY_CONST)) {
         return ecsvm_parser_parse_declaration_statement(
             parser,
             nodes,
